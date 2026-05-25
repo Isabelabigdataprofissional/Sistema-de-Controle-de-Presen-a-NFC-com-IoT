@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>Registrar Presença - Sistema IoT</title>
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Sistema IoT de Controle de Presença por NFC</h1>
+        <p class="subtitulo">Registro de Presença</p>
+
+        <div class="grid">
+            <section class="card">
+                <h2>Registrar presença</h2>
+                <form action="/registrar_presenca" method="post" class="formulario">
+                    
+                    <label>Último cartão lido</label>
+                    <input type="text" value="{{ ultimo_uid_presenca }}" readonly>
+                    <input type="hidden" name="uid" value="{{ ultimo_uid_presenca }}">
+
+                    <button type="submit">Registrar Presença</button>
+                </form>
+            </section>
+
+            <section class="card">
+                <h3>Ou insira manualmente</h3>
+                <form action="/registrar_presenca" method="post" class="formulario">
+                    <label for="uid_manual">UID do cartão</label>
+                    <input type="text" id="uid_manual" name="uid" placeholder="Ex.: UID123">
+
+                    <button type="submit">Registrar Manualmente</button>
+                </form>
+            </section>
+        </div>
+
+        <section class="card">
+            <h2>Lista de presença atual</h2>
+            <p>Presentes: <strong>{{ total_presentes }}</strong> de <strong>{{ lista_presenca | length }}</strong></p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>R.A</th>
+                        <th>Nome</th>
+                        <th>Status</th>
+                        <th>Último registro</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in lista_presenca %}
+                    <tr>
+                        <td>{{ item.id_aluno }}</td>
+                        <td>{{ item.nome }}</td>
+                        <td>{{ item.status }}</td>
+                        <td>{{ item.ultima_hora }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section class="card">
+            <h2>Histórico de presença</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>R.A</th>
+                        <th>Nome</th>
+                        <th>UID</th>
+                        <th>Data/Hora</th>
+                        <th>Tipo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for registro in registros|reverse %}
+                    <tr>
+                        <td>{{ registro.id_aluno }}</td>
+                        <td>{{ registro.nome }}</td>
+                        <td>{{ registro.uid }}</td>
+                        <td>{{ registro.data_hora }}</td>
+                        <td>{{ registro.tipo }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5">Nenhum registro encontrado.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section class="card">
+            <form action="/limpar_registros" method="post">
+                <button type="submit" class="botao-secundario">Limpar histórico</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <a href="{{ url_for('index') }}" class="botao-secundario">← Voltar ao Dashboard</a>
+            <a href="{{ url_for('cadastro_page') }}" class="botao-secundario">Ir para Cadastro →</a>
+        </section>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const presencaForm = document.querySelector('form[action="/registrar_presenca"]');
+            if (presencaForm) {
+                presencaForm.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' && event.target.tagName === 'INPUT' && event.target.type === 'text') {
+                        event.preventDefault();
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>

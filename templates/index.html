@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Dashboard - Sistema de Presença NFC</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Sistema IoT de Controle de Presença por NFC</h1>
+        <p class="subtitulo">Dashboard Principal</p>
+
+        <div class="grid">
+            <section class="card">
+                <h2>Cadastrar Aluno</h2>
+                <p>Adicione novos alunos ao sistema com seu UID NFC.</p>
+                <a href="{{ url_for('cadastro_page') }}" style="display: inline-block; padding: 10px 20px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px;">Ir para Cadastro</a>
+            </section>
+
+            <section class="card">
+                <h2>Registrar Presença</h2>
+                <p>Registre a entrada e saída dos alunos.</p>
+                <a href="{{ url_for('presenca_page') }}" style="display: inline-block; padding: 10px 20px; background-color: #28a745; color: white; text-decoration: none; border-radius: 5px;">Ir para Presença</a>
+            </section>
+        </div>
+
+        <section class="card">
+            <h2>Lista de presença atual</h2>
+            <p>Presentes: <strong>{{ total_presentes }}</strong> de <strong>{{ lista_presenca | length }}</strong></p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>R.A</th>
+                        <th>Nome</th>
+                        <th>Status</th>
+                        <th>Último registro</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in lista_presenca %}
+                    <tr>
+                        <td>{{ item.id_aluno }}</td>
+                        <td>{{ item.nome }}</td>
+                        <td>{{ item.status }}</td>
+                        <td>{{ item.ultima_hora }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section class="card">
+            <h2>Alunos cadastrados</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>R.A</th>
+                        <th>Nome</th>
+                        <th>UID NFC</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for aluno in alunos %}
+                    <tr>
+                        <td>{{ aluno.id_aluno }}</td>
+                        <td>{{ aluno.nome }}</td>
+                        <td>{{ aluno.id_nfc }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    </div>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>Cadastro de Alunos - Sistema IoT</title>
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Sistema IoT de Controle de Presença por NFC</h1>
+        <p class="subtitulo">Cadastro de Alunos</p>
+
+        <div class="grid">
+            <section class="card">
+                <h2>Cadastrar novo aluno</h2>
+                <form action="/cadastrar_aluno" method="post" class="formulario">
+                    
+                    <label for="id_aluno">R.A</label>
+                    <input type="text" id="id_aluno" name="id_aluno" required>
+
+                    <label for="nome">Nome</label>
+                    <input type="text" id="nome" name="nome" required>
+
+                    <label>Último cartão lido</label>
+                    <input type="text" value="{{ ultimo_uid_cadastro }}" readonly>
+                    <input type="hidden" name="id_nfc" value="{{ ultimo_uid_cadastro }}">
+
+                    <button type="submit">Cadastrar</button>
+                </form>
+            </section>
+
+            <section class="card">
+                <h3>UIDs para teste</h3>
+                <ul>
+                    <li>Julia Augustinho → <strong>A8 10 15 C1 18</strong></li>
+                    <li>Amanda → <strong>UID456</strong></li>
+                    <li>Giovanna → <strong>UID789</strong></li>
+                </ul>
+            </section>
+        </div>
+
+        <section class="card">
+            <h2>Alunos cadastrados</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>R.A</th>
+                        <th>Nome</th>
+                        <th>UID NFC</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for aluno in alunos %}
+                    <tr>
+                        <td>{{ aluno.id_aluno }}</td>
+                        <td>{{ aluno.nome }}</td>
+                        <td>{{ aluno.id_nfc }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section class="card">
+            <a href="{{ url_for('index') }}" class="botao-secundario">← Voltar ao Dashboard</a>
+            <a href="{{ url_for('presenca_page') }}" class="botao-secundario">Ir para Presença →</a>
+        </section>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const cadastroForm = document.querySelector('form[action="/cadastrar_aluno"]');
+            if (cadastroForm) {
+                cadastroForm.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' && event.target.tagName === 'INPUT' && event.target.type === 'text') {
+                        event.preventDefault();
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
