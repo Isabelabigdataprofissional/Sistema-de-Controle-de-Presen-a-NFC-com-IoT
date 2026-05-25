@@ -11,35 +11,54 @@
 <body>
     <div class="container">
         <h1>Sistema IoT de Controle de Presença por NFC</h1>
-        <p class="subtitulo">Registro de Presença</p>
+        <p class="subtitulo">Painel de presença com status em tempo real e histórico de leituras.</p>
+
+        <div class="grid status-grid">
+            <section class="card status-card">
+                <h2>Status do sistema</h2>
+                <p id="statusSistema">Carregando...</p>
+            </section>
+            <section class="card status-card">
+                <h2>Fila de leitura</h2>
+                <p>Itens aguardando processamento: <strong id="filaTamanho">0</strong></p>
+            </section>
+            <section class="card status-card">
+                <h2>Último cartão lido</h2>
+                <p id="ultimoCartao">-</p>
+            </section>
+            <section class="card status-card">
+                <h2>Último aluno identificado</h2>
+                <p id="ultimoAluno">-</p>
+            </section>
+            <section class="card status-card">
+                <h2>Horário da última leitura</h2>
+                <p id="horarioUltimaLeitura">-</p>
+            </section>
+            <section class="card status-card">
+                <h2>Presentes</h2>
+                <p><strong id="presentesContador">0</strong></p>
+            </section>
+        </div>
 
         <div class="grid">
             <section class="card">
-                <h2>Registrar presença</h2>
+                <h2>Registrar presença manualmente</h2>
                 <form action="/registrar_presenca" method="post" class="formulario">
-                    
-                    <label>Último cartão lido</label>
-                    <input type="text" value="{{ ultimo_uid_presenca }}" readonly>
-                    <input type="hidden" name="uid" value="{{ ultimo_uid_presenca }}">
-
-                    <button type="submit">Registrar Presença</button>
+                    <label for="uid_manual">UID do cartão</label>
+                    <input type="text" id="uid_manual" name="uid" placeholder="Ex.: UID123">
+                    <button type="submit">Registrar Manualmente</button>
                 </form>
             </section>
 
             <section class="card">
-                <h3>Ou insira manualmente</h3>
-                <form action="/registrar_presenca" method="post" class="formulario">
-                    <label for="uid_manual">UID do cartão</label>
-                    <input type="text" id="uid_manual" name="uid" placeholder="Ex.: UID123">
-
-                    <button type="submit">Registrar Manualmente</button>
-                </form>
+                <h2>Último cartão lido</h2>
+                <p><strong id="ultimoCartaoLeitura">{{ ultimo_uid_presenca }}</strong></p>
+                <p>Este campo mostra o último UID recebido pelo MQTT.</p>
             </section>
         </div>
 
         <section class="card">
             <h2>Lista de presença atual</h2>
-            <p>Presentes: <strong>{{ total_presentes }}</strong> de <strong>{{ lista_presenca | length }}</strong></p>
             <table>
                 <thead>
                     <tr>
@@ -49,7 +68,7 @@
                         <th>Último registro</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="listaPresencaBody">
                     {% for item in lista_presenca %}
                     <tr>
                         <td>{{ item.id_aluno }}</td>
@@ -63,31 +82,33 @@
         </section>
 
         <section class="card">
-            <h2>Histórico de presença</h2>
+            <h2>Histórico recente de leituras</h2>
             <table>
                 <thead>
                     <tr>
-                        <th>R.A</th>
-                        <th>Nome</th>
                         <th>UID</th>
                         <th>Data/Hora</th>
+                        <th>Aluno</th>
+                        <th>Situação</th>
                         <th>Tipo</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% for registro in registros|reverse %}
-                    <tr>
-                        <td>{{ registro.id_aluno }}</td>
-                        <td>{{ registro.nome }}</td>
-                        <td>{{ registro.uid }}</td>
-                        <td>{{ registro.data_hora }}</td>
-                        <td>{{ registro.tipo }}</td>
-                    </tr>
+                <tbody id="historicoBody">
+                    {% if historico_recente %}
+                        {% for item in historico_recente %}
+                        <tr>
+                            <td>{{ item.uid }}</td>
+                            <td>{{ item.data_hora }}</td>
+                            <td>{{ item.nome }}</td>
+                            <td>{{ item.situacao }}</td>
+                            <td>{{ item.tipo }}</td>
+                        </tr>
+                        {% endfor %}
                     {% else %}
                     <tr>
-                        <td colspan="5">Nenhum registro encontrado.</td>
+                        <td colspan="5">Carregando histórico...</td>
                     </tr>
-                    {% endfor %}
+                    {% endif %}
                 </tbody>
             </table>
         </section>
@@ -105,15 +126,82 @@
     </div>
 
     <script>
+        // Atualiza os dados de presença periodicamente usando fetch/AJAX.
+        async function atualizarPresenca() {
+            try {
+                const response = await fetch("{{ url_for('status_presenca') }}");
+                if (!response.ok) {
+                    console.error('Falha ao buscar status de presença');
+                    return;
+                }
+
+                const data = await response.json();
+
+                document.getElementById('statusSistema').textContent = data.status_sistema;
+                document.getElementById('ultimoCartao').textContent = data.ultimo_cartao_lido || '-';
+                document.getElementById('ultimoAluno').textContent = data.ultimo_aluno_identificado || '-';
+                document.getElementById('horarioUltimaLeitura').textContent = data.horario_ultima_leitura || '-';
+                document.getElementById('presentesContador').textContent = data.total_presentes;
+                document.getElementById('filaTamanho').textContent = data.fila_tamanho;
+                document.getElementById('ultimoCartaoLeitura').textContent = data.ultimo_cartao_lido || '-';
+
+                atualizarTabela(
+                    'listaPresencaBody',
+                    data.lista_presenca,
+                    ['id_aluno', 'nome', 'status', 'ultima_hora']
+                );
+
+                atualizarTabela(
+                    'historicoBody',
+                    data.historico_recente,
+                    ['uid', 'data_hora', 'nome', 'situacao', 'tipo']
+                );
+            } catch (error) {
+                console.error('Erro ao atualizar presença:', error);
+            }
+        }
+
+        function atualizarTabela(tbodyId, dados, colunas) {
+            const corpo = document.getElementById(tbodyId);
+            if (!corpo) {
+                return;
+            }
+
+            corpo.innerHTML = '';
+
+            if (!dados || dados.length === 0) {
+                const linha = document.createElement('tr');
+                const coluna = document.createElement('td');
+                coluna.colSpan = colunas.length;
+                coluna.textContent = 'Nenhum registro encontrado.';
+                linha.appendChild(coluna);
+                corpo.appendChild(linha);
+                return;
+            }
+
+            for (const item of dados) {
+                const linha = document.createElement('tr');
+                for (const coluna of colunas) {
+                    const celula = document.createElement('td');
+                    celula.textContent = item[coluna] || '-';
+                    linha.appendChild(celula);
+                }
+                corpo.appendChild(linha);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
-            const presencaForm = document.querySelector('form[action="/registrar_presenca"]');
-            if (presencaForm) {
-                presencaForm.addEventListener('keydown', function (event) {
+            atualizarPresenca();
+            setInterval(atualizarPresenca, 3000);
+
+            const forms = document.querySelectorAll('form');
+            forms.forEach(function (form) {
+                form.addEventListener('keydown', function (event) {
                     if (event.key === 'Enter' && event.target.tagName === 'INPUT' && event.target.type === 'text') {
                         event.preventDefault();
                     }
                 });
-            }
+            });
         });
     </script>
 </body>

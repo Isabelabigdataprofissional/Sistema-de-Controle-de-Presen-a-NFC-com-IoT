@@ -11,66 +11,19 @@
 <body>
     <div class="container">
         <h1>Sistema IoT de Controle de Presença por NFC</h1>
-        <p class="subtitulo">Dashboard Principal</p>
+        <p class="subtitulo">Dashboard principal com navegação para cadastro e controle de presença.</p>
 
         <div class="grid">
             <section class="card">
-                <h2>Cadastrar Aluno</h2>
-                <p>Adicione novos alunos ao sistema com seu UID NFC.</p>
-                <a href="{{ url_for('cadastro_page') }}" style="display: inline-block; padding: 10px 20px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px;">Ir para Cadastro</a>
+                <h2>Cadastro de Alunos</h2>
+                <p>Use esta área para abrir o formulário de cadastro de novo aluno por UID NFC.</p>
+                <a href="{{ url_for('cadastro_page') }}" class="botao-principal">Ir para Cadastro</a>
             </section>
 
             <section class="card">
-                <h2>Registrar Presença</h2>
-                <p>Registre a entrada e saída dos alunos.</p>
-                <a href="{{ url_for('presenca_page') }}" style="display: inline-block; padding: 10px 20px; background-color: #28a745; color: white; text-decoration: none; border-radius: 5px;">Ir para Presença</a>
+                <h2>Controle de Presença</h2>
+                <p>Veja o painel de presença, o histórico de leituras e o status do sistema.</p>
+                <a href="{{ url_for('presenca_page') }}" class="botao-principal botao-presenca">Ir para Presença</a>
             </section>
         </div>
-
-        <section class="card">
-            <h2>Lista de presença atual</h2>
-            <p>Presentes: <strong>{{ total_presentes }}</strong> de <strong>{{ lista_presenca | length }}</strong></p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>R.A</th>
-                        <th>Nome</th>
-                        <th>Status</th>
-                        <th>Último registro</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in lista_presenca %}
-                    <tr>
-                        <td>{{ item.id_aluno }}</td>
-                        <td>{{ item.nome }}</td>
-                        <td>{{ item.status }}</td>
-                        <td>{{ item.ultima_hora }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </section>
-
-        <section class="card">
-            <h2>Alunos cadastrados</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>R.A</th>
-                        <th>Nome</th>
-                        <th>UID NFC</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for aluno in alunos %}
-                    <tr>
-                        <td>{{ aluno.id_aluno }}</td>
-                        <td>{{ aluno.nome }}</td>
-                        <td>{{ aluno.id_nfc }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </section>
     </div>
