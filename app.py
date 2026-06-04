@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from flask import Flask, redirect, render_template, request, url_for, jsonify
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
 
 import paho.mqtt.client as mqtt
 #import json
@@ -12,7 +14,23 @@ from queue import Queue, Empty
 from threading import Thread, Lock
 # import logging
 
+from models import Base, Aluno, Presenca
+
 app = Flask(__name__)
+
+# ===== CONFIGURAÇÃO DO BANCO DE DADOS =====
+DATABASE_URL = "sqlite:///presenca.db"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Cria as tabelas automaticamente se não existirem
+Base.metadata.create_all(bind=engine)
+print("[DB] Tabelas criadas/verificadas com sucesso")
+
+
+def get_db_session() -> Session:
+    """Retorna uma nova sessão de banco de dados."""
+    return SessionLocal()
 
 # ===== NOVA FUNCIONALIDADE: FILA DE PROCESSAMENTO NFC =====
 fila_uids: Queue[Dict[str, str]] = Queue()
