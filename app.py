@@ -32,6 +32,65 @@ def get_db_session() -> Session:
     """Retorna uma nova sessão de banco de dados."""
     return SessionLocal()
 
+
+# ===== FUNÇÕES DE BANCO DE DADOS - ALUNOS =====
+
+def obter_todos_alunos() -> List[Dict[str, str]]:
+    """Obtém todos os alunos do banco e retorna como lista de dicts."""
+    db = get_db_session()
+    try:
+        alunos = db.query(Aluno).all()
+        return [aluno.to_dict() for aluno in alunos]
+    finally:
+        db.close()
+
+
+def buscar_aluno_por_uid_db(uid: str) -> Optional[Aluno]:
+    """Busca um aluno pelo UID no banco de dados."""
+    uid = normalizar_uid(uid)
+    db = get_db_session()
+    try:
+        print(f"[DB_BUSCA] Procurando UID='{uid}' no banco")
+        aluno = db.query(Aluno).filter(Aluno.id_nfc == uid).first()
+        if aluno:
+            print(f"[DB_BUSCA] Aluno encontrado: id_aluno='{aluno.id_aluno}' nome='{aluno.nome}'")
+            # Desanexa o objeto da sessão para evitar problemas
+            db.expunge(aluno)
+            return aluno
+        else:
+            print(f"[DB_BUSCA] Nenhum aluno encontrado para UID='{uid}'")
+            return None
+    finally:
+        db.close()
+
+
+def criar_aluno(id_aluno: str, nome: str, id_nfc: str) -> bool:
+    """
+    Cria um novo aluno no banco.
+    Retorna True se bem-sucedido, False se UID já existe.
+    """
+    id_nfc = normalizar_uid(id_nfc)
+    db = get_db_session()
+    try:
+        # Verifica se UID já existe
+        aluno_existente = db.query(Aluno).filter(Aluno.id_nfc == id_nfc).first()
+        if aluno_existente:
+            print(f"[DB_CRIAR] UID já cadastrado: '{id_nfc}'")
+            return False
+
+        novo_aluno = Aluno(id_aluno=id_aluno, nome=nome, id_nfc=id_nfc)
+        db.add(novo_aluno)
+        db.commit()
+        print(f"[DB_CRIAR] Aluno cadastrado: id_aluno='{id_aluno}' nome='{nome}' id_nfc='{id_nfc}'")
+        return True
+    except Exception as e:
+        print(f"[DB_CRIAR] Erro ao criar aluno: {e}")
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
 # ===== NOVA FUNCIONALIDADE: FILA DE PROCESSAMENTO NFC =====
 fila_uids: Queue[Dict[str, str]] = Queue()
 historico_leituras: List[Dict[str, str]] = []
@@ -262,27 +321,18 @@ def processar_fila() -> None:
         fila_uids.task_done()
 
 
-# Base simulada de alunos
-alunos: List[Dict[str, str]] = [
-    {"id_aluno": "1", "nome": "Julia Augustinho", "id_nfc": "A8 10 15 C1 18"},
-    {"id_aluno": "2", "nome": "Amanda", "id_nfc": "UID456"},
-    {"id_aluno": "3", "nome": "Giovanna", "id_nfc": "UID789"},
-]
-
-# Registros de presença
+# Registros de presença (ainda em memória)
 registros: List[Dict[str, str]] = []
 
 
 def buscar_aluno_por_uid(uid: str) -> Optional[Dict[str, str]]:
-    """Busca um aluno pelo UID do cartão NFC."""
-    uid = normalizar_uid(uid)
-    print(f"[BUSCA_ALUNO] Iniciando busca para UID='{uid}'")
-    for aluno in alunos:
-        print(f"[BUSCA_ALUNO] Comparando com aluno id_aluno='{aluno['id_aluno']}' uid_salvo='{aluno['id_nfc']}'")
-        if aluno["id_nfc"] == uid:
-            print(f"[BUSCA_ALUNO] Aluno encontrado: id_aluno='{aluno['id_aluno']}' nome='{aluno['nome']}'")
-            return aluno
-    print(f"[BUSCA_ALUNO] Nenhum aluno encontrado para UID='{uid}'")
+    """
+    Busca um aluno pelo UID do cartão NFC no banco de dados.
+    Retorna um dicionário compatível com o código existente.
+    """
+    aluno = buscar_aluno_por_uid_db(uid)
+    if aluno:
+        return aluno.to_dict()
     return None
 
 
@@ -304,8 +354,9 @@ def definir_tipo_registro(id_aluno: str) -> str:
 
 
 def calcular_lista_presenca() -> List[Dict[str, str]]:
-    """Retorna a lista de presença atual de cada aluno."""
+    """Retorna a lista de presença atual de cada aluno (obtendo do banco)."""
     lista_presenca: List[Dict[str, str]] = []
+    alunos = obter_todos_alunos()
 
     for aluno in alunos:
         registros_aluno = [r for r in registros if r["id_aluno"] == aluno["id_aluno"] and r["tipo"] in {"entrada", "saida"}]
@@ -337,7 +388,7 @@ def index():
 
     return render_template(
         "index.html",
-        alunos=alunos,
+        alunos=obter_todos_alunos(),
         registros=registros,
         lista_presenca=lista_presenca,
         total_presentes=presentes,
@@ -347,7 +398,7 @@ def index():
 def cadastro_page():
     return render_template(
         "cadastro.html",
-        alunos=alunos,
+        alunos=obter_todos_alunos(),
         ultimo_uid_cadastro=ultimo_uid_cadastro,
     )
 
@@ -402,19 +453,10 @@ def cadastrar_aluno():
     id_nfc = request.form.get("id_nfc", "").strip()
 
     if id_aluno and nome and id_nfc:
-        id_nfc = normalizar_uid(id_nfc)
-
-        # Evita duplicidade de UID
-        if not any(aluno["id_nfc"] == id_nfc for aluno in alunos):
-            alunos.append(
-                {
-                    "id_aluno": id_aluno,
-                    "nome": nome,
-                    "id_nfc": id_nfc,
-                }
-            )
-            print(f"[CADASTRO] Aluno cadastrado: id_aluno='{id_aluno}' nome='{nome}' id_nfc='{id_nfc}'")
-
+        # Tenta criar o aluno no banco
+        sucesso = criar_aluno(id_aluno, nome, id_nfc)
+        
+        if sucesso:
             # ===== ALTERAÇÃO: REGISTRO AUTOMÁTICO DE PRESENÇA APÓS CADASTRO =====
             print(f"[CADASTRO] Registrando presença automaticamente para UID='{id_nfc}'")
             processar_presenca(id_nfc)
@@ -422,7 +464,7 @@ def cadastrar_aluno():
             # Limpa o UID após cadastro
             ultimo_uid_cadastro = ""
         else:
-            print(f"[CADASTRO] UID já cadastrado: '{id_nfc}'")
+            print(f"[CADASTRO] Falha ao cadastrar aluno (UID pode estar duplicado)")
 
     return redirect(url_for("cadastro_page"))
 
@@ -476,6 +518,7 @@ def limpar_registros():
 
 if __name__ == "__main__":
     #print("Servidor iniciando em http://127.0.0.1:5000")
+    
     thread_mqtt = Thread(target=iniciar_mqtt, daemon=True)
     thread_mqtt.start()
 
