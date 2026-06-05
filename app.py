@@ -104,7 +104,6 @@ ultimo_evento_presenca: Dict[str, str] = {
 }
 ultimo_uid_cadastro = ""
 ultimo_uid_presenca = ""
-ultimo_para_cadastro = True
 estado_lock = Lock()
 IGNORE_DUPLICATE_INTERVAL_SEGUNDOS = 5
 ultimas_leituras_por_uid: Dict[str, datetime] = {}
@@ -136,23 +135,26 @@ def normalizar_uid(uid: str) -> str:
 def ao_receber_mensagem(client, userdata, msg):
     # logger.debug(f"[MQTT] Topico: {msg.topic}, mensagem: {msg.payload.decode()}")
 
-    global ultimo_uid_cadastro, ultimo_uid_presenca, ultimo_para_cadastro
+    global ultimo_uid_cadastro, ultimo_uid_presenca
 
     uid_recebido = msg.payload.decode().strip()
     uid_recebido = normalizar_uid(uid_recebido)
 
     print(f"[MQTT] Mensagem recebida no tópico {msg.topic}: '{uid_recebido}'")
 
-    # Alterna entre cadastro e presença para preservar o fluxo atual do sistema.
-    # Essa alternância mantém o comportamento que já existia no projeto.
+    # ===== FASE 3: RECONHECIMENTO AUTOMÁTICO POR UID =====
+    # Consulta banco para determinar se é cadastro ou presença
+    aluno_encontrado = buscar_aluno_por_uid_db(uid_recebido)
+    
     with estado_lock:
-        destino = "cadastro" if ultimo_para_cadastro else "presenca"
-        ultimo_para_cadastro = not ultimo_para_cadastro
-
-        if destino == "cadastro":
-            ultimo_uid_cadastro = uid_recebido
-        else:
+        if aluno_encontrado:
+            destino = "presenca"
             ultimo_uid_presenca = uid_recebido
+            print(f"[MQTT] UID reconhecido: aluno_id='{aluno_encontrado.id_aluno}' nome='{aluno_encontrado.nome}'")
+        else:
+            destino = "cadastro"
+            ultimo_uid_cadastro = uid_recebido
+            print(f"[MQTT] UID desconhecido: encaminhando para cadastro")
 
     # Adiciona cada UID à fila para processamento sequencial.
     fila_uids.put({
@@ -294,7 +296,13 @@ def processar_presenca(uid: str) -> None:
 
 
 def processar_fila() -> None:
-    """Consume a fila de leituras MQTT e trata cada item de forma individual."""
+    """
+    Consumer da fila MQTT.
+    
+    FASE 3: Reconhecimento automático por UID
+    - Se destino="presenca": UID foi reconhecido no banco → registra entrada/saída
+    - Se destino="cadastro": UID é novo → aguarda cadastro do usuário
+    """
     while True:
         try:
             item = fila_uids.get(timeout=1)
@@ -307,6 +315,7 @@ def processar_fila() -> None:
         print(f"[FILA] Desenfileirando UID='{uid}' destino='{destino}' recebido_em='{recebido_em}'")
 
         if destino == "cadastro":
+            # UID desconhecido: aguarda cadastro
             registrar_evento_historico(
                 uid,
                 destino,
@@ -316,6 +325,7 @@ def processar_fila() -> None:
                 "cadastro",
             )
         else:
+            # UID reconhecido: processa presença automaticamente
             processar_presenca(uid)
 
         fila_uids.task_done()
