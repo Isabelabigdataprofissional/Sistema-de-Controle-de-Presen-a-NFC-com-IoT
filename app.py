@@ -64,9 +64,9 @@ def buscar_aluno_por_uid_db(uid: str) -> Optional[Aluno]:
         db.close()
 
 
-def criar_aluno(id_aluno: str, nome: str, id_nfc: str) -> bool:
+def criar_aluno(ra: str, nome: str, id_nfc: str) -> bool:
     """
-    Cria um novo aluno no banco.
+    Cria um novo aluno no banco (FASE 4: usa ra em vez de id_aluno).
     Retorna True se bem-sucedido, False se UID já existe.
     """
     id_nfc = normalizar_uid(id_nfc)
@@ -78,10 +78,10 @@ def criar_aluno(id_aluno: str, nome: str, id_nfc: str) -> bool:
             print(f"[DB_CRIAR] UID já cadastrado: '{id_nfc}'")
             return False
 
-        novo_aluno = Aluno(id_aluno=id_aluno, nome=nome, id_nfc=id_nfc)
+        novo_aluno = Aluno(ra=ra, nome=nome, id_nfc=id_nfc)
         db.add(novo_aluno)
         db.commit()
-        print(f"[DB_CRIAR] Aluno cadastrado: id_aluno='{id_aluno}' nome='{nome}' id_nfc='{id_nfc}'")
+        print(f"[DB_CRIAR] Aluno cadastrado: RA='{ra}' nome='{nome}' id_nfc='{id_nfc}'")
         return True
     except Exception as e:
         print(f"[DB_CRIAR] Erro ao criar aluno: {e}")
@@ -91,12 +91,128 @@ def criar_aluno(id_aluno: str, nome: str, id_nfc: str) -> bool:
         db.close()
 
 
+# ===== FUNÇÕES DE BANCO DE DADOS - PRESENÇA =====
+
+def buscar_ultima_presenca_db(ra: str) -> Optional[Presenca]:
+    """Busca a última presença registrada de um aluno pelo RA."""
+    db = get_db_session()
+    try:
+        print(f"[DB_PRESENCA] Procurando última presença para RA='{ra}'")
+        ultima_presenca = (
+            db.query(Presenca)
+            .filter(Presenca.ra == ra)
+            .order_by(Presenca.criado_em.desc())
+            .first()
+        )
+        if ultima_presenca:
+            print(f"[DB_PRESENCA] Encontrada: tipo='{ultima_presenca.tipo}' data_hora='{ultima_presenca.data_hora}'")
+            db.expunge(ultima_presenca)
+            return ultima_presenca
+        else:
+            print(f"[DB_PRESENCA] Nenhuma presença anterior encontrada para RA='{ra}'")
+            return None
+    finally:
+        db.close()
+
+
+def verificar_anti_duplicidade_40min(ra: str) -> tuple[bool, str]:
+    """
+    Verifica se pode registrar uma nova presença considerando janela de 40 minutos.
+    
+    Retorna:
+        (pode_registrar: bool, motivo: str)
+        - (True, "OK") - pode registrar
+        - (False, "motivo") - não pode registrar
+    """
+    ultima_presenca = buscar_ultima_presenca_db(ra)
+    
+    if not ultima_presenca:
+        print(f"[ANTI_DUP] RA='{ra}': primeira presença, autorizado")
+        return True, "Primeira presença"
+    
+    # Parse data_hora do formato "DD/MM/YYYY HH:MM:SS"
+    try:
+        ultima_data = datetime.strptime(ultima_presenca.data_hora, "%d/%m/%Y %H:%M:%S")
+        agora = datetime.now()
+        diferenca_minutos = (agora - ultima_data).total_seconds() / 60
+        
+        print(f"[ANTI_DUP] RA='{ra}': última presença há {diferenca_minutos:.1f} minutos")
+        
+        if diferenca_minutos < 40:
+            motivo = f"Presença já registrada há {int(diferenca_minutos)} minutos. Aguarde 40 minutos."
+            print(f"[ANTI_DUP] RA='{ra}': {motivo}")
+            return False, motivo
+        else:
+            print(f"[ANTI_DUP] RA='{ra}': janela de 40 min atendida, autorizado")
+            return True, "Autorizado após 40 minutos"
+    except Exception as e:
+        print(f"[ANTI_DUP] Erro ao processar data: {e}")
+        return True, "Erro em verificação (autorizado por segurança)"
+
+
+def registrar_presenca_bd(ra: str, tipo: str, data_hora: str) -> bool:
+    """
+    Registra uma nova presença no banco de dados.
+    
+    Args:
+        ra: RA do aluno
+        tipo: "entrada", "saida", "erro", "ignorado"
+        data_hora: string no formato "DD/MM/YYYY HH:MM:SS"
+    
+    Returns:
+        True se registrado com sucesso, False caso contrário
+    """
+    db = get_db_session()
+    try:
+        nova_presenca = Presenca(ra=ra, tipo=tipo, data_hora=data_hora)
+        db.add(nova_presenca)
+        db.commit()
+        print(f"[DB_PRESENCA_REG] Presença registrada: ra='{ra}' tipo='{tipo}' data_hora='{data_hora}'")
+        return True
+    except Exception as e:
+        print(f"[DB_PRESENCA_REG] Erro ao registrar presença: {e}")
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def obter_presencas_db(ra: str = None, limite: int = None) -> List[Dict]:
+    """
+    Obtém registros de presença do banco.
+    
+    Args:
+        ra: Filtro opcional por RA. Se None, retorna todos.
+        limite: Limita quantidade de resultados. Se None, sem limite.
+    
+    Returns:
+        Lista de dicts com informações de presença
+    """
+    db = get_db_session()
+    try:
+        query = db.query(Presenca).order_by(Presenca.criado_em.desc())
+        
+        if ra:
+            query = query.filter(Presenca.ra == ra)
+        
+        if limite:
+            query = query.limit(limite)
+        
+        presencas = query.all()
+        resultado = [p.to_dict() for p in presencas]
+        
+        print(f"[DB_PRESENCA_OBTER] Retornando {len(resultado)} presencas")
+        return resultado
+    finally:
+        db.close()
+
+
 # ===== NOVA FUNCIONALIDADE: FILA DE PROCESSAMENTO NFC =====
 fila_uids: Queue[Dict[str, str]] = Queue()
 historico_leituras: List[Dict[str, str]] = []
 ultimo_evento_presenca: Dict[str, str] = {
     "uid": "",
-    "id_aluno": "",
+    "ra": "",
     "nome": "",
     "data_hora": "",
     "situacao": "",
@@ -105,8 +221,6 @@ ultimo_evento_presenca: Dict[str, str] = {
 ultimo_uid_cadastro = ""
 ultimo_uid_presenca = ""
 estado_lock = Lock()
-IGNORE_DUPLICATE_INTERVAL_SEGUNDOS = 5
-ultimas_leituras_por_uid: Dict[str, datetime] = {}
 
 
 # ... (seu código de alunos e registros continua igual)
@@ -150,7 +264,7 @@ def ao_receber_mensagem(client, userdata, msg):
         if aluno_encontrado:
             destino = "presenca"
             ultimo_uid_presenca = uid_recebido
-            print(f"[MQTT] UID reconhecido: aluno_id='{aluno_encontrado.id_aluno}' nome='{aluno_encontrado.nome}'")
+            print(f"[MQTT] UID reconhecido: RA='{aluno_encontrado.ra}' nome='{aluno_encontrado.nome}'")
         else:
             destino = "cadastro"
             ultimo_uid_cadastro = uid_recebido
@@ -209,25 +323,25 @@ def iniciar_mqtt():
             time.sleep(5)
 
 
-# ===== NOVA FUNCIONALIDADE: PROCESSADOR DE FILA =====
+# ===== PROCESSADOR DE FILA =====
 
 def registrar_evento_historico(
     uid: str,
+    ra: str,
+    nome: str,
     destino: str,
     situacao: str,
-    id_aluno: str,
-    nome: str,
     tipo: str,
 ) -> None:
-    """Registra cada leitura no histórico para rastreabilidade."""
-    print(f"[HISTORICO] UID='{uid}' destino='{destino}' situacao='{situacao}' id_aluno='{id_aluno}' nome='{nome}' tipo='{tipo}'")
+    """Registra cada leitura no histórico para rastreabilidade (FASE 4: com RA em vez de ID)."""
+    print(f"[HISTORICO] UID='{uid}' RA='{ra}' nome='{nome}' destino='{destino}' situacao='{situacao}' tipo='{tipo}'")
     historico_leituras.append(
         {
             "uid": uid,
+            "ra": ra,
+            "nome": nome,
             "destino": destino,
             "situacao": situacao,
-            "id_aluno": id_aluno,
-            "nome": nome,
             "tipo": tipo,
             "data_hora": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         }
@@ -235,62 +349,93 @@ def registrar_evento_historico(
 
 
 def processar_presenca(uid: str) -> None:
-    """Processa automaticamente a presença quando o UID chega na fila."""
+    """
+    FASE 4: Processa automaticamente a presença com anti-duplicidade de 40 minutos.
+    
+    Fluxo:
+    1. Busca aluno pelo UID
+    2. Se não encontrado: registra como erro
+    3. Se encontrado:
+       a. Verifica janela anti-duplicidade de 40 minutos
+       b. Se dentro da janela: ignora (presença já registrada)
+       c. Se fora da janela: define tipo (entrada/saída) e registra em BD
+    """
     agora = datetime.now()
-
-    with estado_lock:
-        ultimo_tempo = ultimas_leituras_por_uid.get(uid)
-        print(f"[PRESENCA] Verificando duplicidade para UID='{uid}'")
-        if ultimo_tempo and (agora - ultimo_tempo).total_seconds() < IGNORE_DUPLICATE_INTERVAL_SEGUNDOS:
-            print(f"[PRESENCA] Ignorado por duplicidade: UID='{uid}' ultimo_tempo='{ultimo_tempo}' agora='{agora}'")
-            registrar_evento_historico(
-                uid,
-                "presenca",
-                "Ignorado por duplicidade",
-                "-",
-                "Cartão repetido",
-                "ignorado",
-            )
-            return
-
-        ultimas_leituras_por_uid[uid] = agora
-        print(f"[PRESENCA] UID autorizado para processamento: '{uid}'")
-
-    aluno = buscar_aluno_por_uid(uid)
-    if aluno is not None:
-        tipo = definir_tipo_registro(aluno["id_aluno"])
-        novo_registro = {
-            "id_aluno": aluno["id_aluno"],
-            "nome": aluno["nome"],
-            "uid": uid,
-            "data_hora": agora.strftime("%d/%m/%Y %H:%M:%S"),
-            "tipo": tipo,
-        }
-        registros.append(novo_registro)
-        situacao = "Processado com sucesso"
-        id_aluno = aluno["id_aluno"]
-        nome = aluno["nome"]
+    agora_formatada = agora.strftime("%d/%m/%Y %H:%M:%S")
+    
+    print(f"[PRESENCA] Processando UID='{uid}'")
+    
+    # Busca aluno no banco
+    aluno = buscar_aluno_por_uid_db(uid)
+    
+    if aluno is None:
+        print(f"[PRESENCA] Aluno não encontrado para UID='{uid}'")
+        registrar_evento_historico(
+            uid=uid,
+            ra="-",
+            nome="Cartão não identificado",
+            destino="presenca",
+            situacao="Aluno não encontrado",
+            tipo="erro",
+        )
+        with estado_lock:
+            ultimo_evento_presenca["uid"] = uid
+            ultimo_evento_presenca["ra"] = "-"
+            ultimo_evento_presenca["nome"] = "Cartão não identificado"
+            ultimo_evento_presenca["data_hora"] = agora_formatada
+            ultimo_evento_presenca["situacao"] = "Aluno não encontrado"
+            ultimo_evento_presenca["tipo"] = "erro"
+        return
+    
+    # Aluno encontrado: verifica anti-duplicidade
+    ra = aluno.ra
+    pode_registrar, motivo = verificar_anti_duplicidade_40min(ra)
+    
+    if not pode_registrar:
+        print(f"[PRESENCA] RA='{ra}': {motivo}")
+        registrar_evento_historico(
+            uid=uid,
+            ra=ra,
+            nome=aluno.nome,
+            destino="presenca",
+            situacao=motivo,
+            tipo="ignorado",
+        )
+        with estado_lock:
+            ultimo_evento_presenca["uid"] = uid
+            ultimo_evento_presenca["ra"] = ra
+            ultimo_evento_presenca["nome"] = aluno.nome
+            ultimo_evento_presenca["data_hora"] = agora_formatada
+            ultimo_evento_presenca["situacao"] = motivo
+            ultimo_evento_presenca["tipo"] = "ignorado"
+        return
+    
+    # Pode registrar: define tipo e registra no BD
+    tipo = definir_tipo_registro(ra)
+    sucesso = registrar_presenca_bd(ra=ra, tipo=tipo, data_hora=agora_formatada)
+    
+    if sucesso:
+        situacao = f"Presença registrada como {tipo}"
+        print(f"[PRESENCA] RA='{ra}': presença registrada ({tipo})")
     else:
-        novo_registro = {
-            "id_aluno": "-",
-            "nome": "Cartão não identificado",
-            "uid": uid,
-            "data_hora": agora.strftime("%d/%m/%Y %H:%M:%S"),
-            "tipo": "erro",
-        }
-        registros.append(novo_registro)
-        situacao = "Aluno não encontrado"
-        id_aluno = "-"
-        nome = "Cartão não identificado"
+        situacao = "Erro ao registrar no banco"
         tipo = "erro"
-
-    registrar_evento_historico(uid, "presenca", situacao, id_aluno, nome, tipo)
-
+        print(f"[PRESENCA] RA='{ra}': erro ao registrar")
+    
+    registrar_evento_historico(
+        uid=uid,
+        ra=ra,
+        nome=aluno.nome,
+        destino="presenca",
+        situacao=situacao,
+        tipo=tipo,
+    )
+    
     with estado_lock:
         ultimo_evento_presenca["uid"] = uid
-        ultimo_evento_presenca["id_aluno"] = id_aluno
-        ultimo_evento_presenca["nome"] = nome
-        ultimo_evento_presenca["data_hora"] = novo_registro["data_hora"]
+        ultimo_evento_presenca["ra"] = ra
+        ultimo_evento_presenca["nome"] = aluno.nome
+        ultimo_evento_presenca["data_hora"] = agora_formatada
         ultimo_evento_presenca["situacao"] = situacao
         ultimo_evento_presenca["tipo"] = tipo
 
@@ -317,12 +462,12 @@ def processar_fila() -> None:
         if destino == "cadastro":
             # UID desconhecido: aguarda cadastro
             registrar_evento_historico(
-                uid,
-                destino,
-                "Recebido para cadastro",
-                "-",
-                "Aguardando cadastro",
-                "cadastro",
+                uid=uid,
+                ra="-",
+                nome="Aguardando cadastro",
+                destino="cadastro",
+                situacao="Recebido para cadastro",
+                tipo="cadastro",
             )
         else:
             # UID reconhecido: processa presença automaticamente
@@ -331,9 +476,7 @@ def processar_fila() -> None:
         fila_uids.task_done()
 
 
-# Registros de presença (ainda em memória)
-registros: List[Dict[str, str]] = []
-
+# ===== FUNÇÕES DE SUPORTE =====
 
 def buscar_aluno_por_uid(uid: str) -> Optional[Dict[str, str]]:
     """
@@ -346,41 +489,53 @@ def buscar_aluno_por_uid(uid: str) -> Optional[Dict[str, str]]:
     return None
 
 
-def definir_tipo_registro(id_aluno: str) -> str:
+def definir_tipo_registro(ra: str) -> str:
     """
-    Define se o próximo registro será entrada ou saída.
+    FASE 4: Define se o próximo registro será entrada ou saída consultando o BD.
+    
     Regra:
-    - se não houver registro anterior, será entrada
-    - se o último registro foi entrada, o próximo será saída
-    - caso contrário, será entrada
+    - Se não houver registro anterior: entrada (primeira presença)
+    - Se último registro foi entrada: saída
+    - Caso contrário: entrada
     """
-    registros_aluno = [r for r in registros if r["id_aluno"] == id_aluno]
-
-    if not registros_aluno:
+    ultima_presenca = buscar_ultima_presenca_db(ra)
+    
+    if not ultima_presenca:
+        print(f"[TIPO] RA='{ra}': primeira presença, tipo=entrada")
         return "entrada"
-
-    ultimo = registros_aluno[-1]
-    return "saida" if ultimo["tipo"] == "entrada" else "entrada"
+    
+    tipo_resultado = "saida" if ultima_presenca.tipo == "entrada" else "entrada"
+    print(f"[TIPO] RA='{ra}': último={ultima_presenca.tipo}, próximo={tipo_resultado}")
+    return tipo_resultado
 
 
 def calcular_lista_presenca() -> List[Dict[str, str]]:
-    """Retorna a lista de presença atual de cada aluno (obtendo do banco)."""
+    """
+    FASE 4: Retorna a lista de presença atual de cada aluno consultando o BD.
+    
+    Para cada aluno:
+    - Busca última presença no BD
+    - Se último tipo foi entrada: Presente
+    - Se último tipo foi saída: Ausente
+    - Se não há presença: Ausente
+    """
     lista_presenca: List[Dict[str, str]] = []
     alunos = obter_todos_alunos()
 
     for aluno in alunos:
-        registros_aluno = [r for r in registros if r["id_aluno"] == aluno["id_aluno"] and r["tipo"] in {"entrada", "saida"}]
-        if registros_aluno:
-            ultimo = registros_aluno[-1]
-            status = "Presente" if ultimo["tipo"] == "entrada" else "Ausente"
-            ultima_hora = ultimo["data_hora"]
+        ra = aluno["ra"]
+        ultima_presenca = buscar_ultima_presenca_db(ra)
+        
+        if ultima_presenca and ultima_presenca.tipo in {"entrada", "saida"}:
+            status = "Presente" if ultima_presenca.tipo == "entrada" else "Ausente"
+            ultima_hora = ultima_presenca.data_hora
         else:
             status = "Ausente"
             ultima_hora = "-"
 
         lista_presenca.append(
             {
-                "id_aluno": aluno["id_aluno"],
+                "ra": aluno["ra"],
                 "nome": aluno["nome"],
                 "id_nfc": aluno["id_nfc"],
                 "status": status,
@@ -395,11 +550,12 @@ def calcular_lista_presenca() -> List[Dict[str, str]]:
 def index():
     lista_presenca = calcular_lista_presenca()
     presentes = sum(1 for item in lista_presenca if item["status"] == "Presente")
+    presencas_recentes = obter_presencas_db(limite=20)
 
     return render_template(
         "index.html",
         alunos=obter_todos_alunos(),
-        registros=registros,
+        registros=presencas_recentes,
         lista_presenca=lista_presenca,
         total_presentes=presentes,
     )
@@ -416,13 +572,14 @@ def cadastro_page():
 def presenca_page():
     lista_presenca = calcular_lista_presenca()
     presentes = sum(1 for item in lista_presenca if item["status"] == "Presente")
+    presencas_recentes = obter_presencas_db(limite=50)
 
     with estado_lock:
         historico_recente = historico_leituras[-10:]
 
     return render_template(
         "presenca.html",
-        registros=registros,
+        registros=presencas_recentes,
         lista_presenca=lista_presenca,
         total_presentes=presentes,
         ultimo_uid_presenca=ultimo_uid_presenca,
@@ -458,16 +615,16 @@ def status_presenca():
 def cadastrar_aluno():
     global ultimo_uid_cadastro
     
-    id_aluno = request.form.get("id_aluno", "").strip()
+    ra = request.form.get("id_aluno", "").strip()  # HTML form ainda usa id_aluno
     nome = request.form.get("nome", "").strip()
     id_nfc = request.form.get("id_nfc", "").strip()
 
-    if id_aluno and nome and id_nfc:
+    if ra and nome and id_nfc:
         # Tenta criar o aluno no banco
-        sucesso = criar_aluno(id_aluno, nome, id_nfc)
+        sucesso = criar_aluno(ra, nome, id_nfc)
         
         if sucesso:
-            # ===== ALTERAÇÃO: REGISTRO AUTOMÁTICO DE PRESENÇA APÓS CADASTRO =====
+            # ===== FASE 4: REGISTRO AUTOMÁTICO DE PRESENÇA APÓS CADASTRO =====
             print(f"[CADASTRO] Registrando presença automaticamente para UID='{id_nfc}'")
             processar_presenca(id_nfc)
 
@@ -481,6 +638,10 @@ def cadastrar_aluno():
 
 @app.route("/registrar_presenca", methods=["POST"])
 def registrar_presenca():
+    """
+    FASE 4: Rota manual para registrar presença.
+    Agora usa processar_presenca que verifica anti-duplicidade e registra em BD.
+    """
     global ultimo_uid_presenca
     
     uid = request.form.get("uid", "").strip()
@@ -489,30 +650,8 @@ def registrar_presenca():
     if not uid:
         return redirect(url_for("presenca_page"))
 
-    aluno = buscar_aluno_por_uid(uid)
-
-    if aluno is not None:
-        tipo = definir_tipo_registro(aluno["id_aluno"])
-
-        registros.append(
-            {
-                "id_aluno": aluno["id_aluno"],
-                "nome": aluno["nome"],
-                "uid": uid,
-                "data_hora": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                "tipo": tipo,
-            }
-        )
-    else:
-        registros.append(
-            {
-                "id_aluno": "-",
-                "nome": "Cartão não identificado",
-                "uid": uid,
-                "data_hora": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                "tipo": "erro",
-            }
-        )
+    # Processa presença através do pipeline normal (anti-duplicidade + BD)
+    processar_presenca(uid)
     
     # Limpa o UID após registrar
     ultimo_uid_presenca = ""
@@ -522,7 +661,21 @@ def registrar_presenca():
 
 @app.route("/limpar_registros", methods=["POST"])
 def limpar_registros():
-    registros.clear()
+    """
+    FASE 4: Limpa todos os registros de presença do banco de dados.
+    CUIDADO: Esta operação é irreversível!
+    """
+    db = get_db_session()
+    try:
+        db.query(Presenca).delete()
+        db.commit()
+        print("[DB_LIMPAR] Todos os registros de presença foram removidos")
+    except Exception as e:
+        print(f"[DB_LIMPAR] Erro ao limpar registros: {e}")
+        db.rollback()
+    finally:
+        db.close()
+    
     return redirect(url_for("presenca_page"))
 
 
