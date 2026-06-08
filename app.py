@@ -8,11 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
 import paho.mqtt.client as mqtt
-#import json
 import time
 from queue import Queue, Empty
 from threading import Thread, Lock
-# import logging
 
 from models import Base, Aluno, Presenca
 
@@ -53,7 +51,7 @@ def buscar_aluno_por_uid_db(uid: str) -> Optional[Aluno]:
         print(f"[DB_BUSCA] Procurando UID='{uid}' no banco")
         aluno = db.query(Aluno).filter(Aluno.id_nfc == uid).first()
         if aluno:
-            print(f"[DB_BUSCA] Aluno encontrado: id_aluno='{aluno.id_aluno}' nome='{aluno.nome}'")
+            print(f"[DB_BUSCA] Aluno encontrado: RA='{aluno.ra}' nome='{aluno.nome}'")
             # Desanexa o objeto da sessão para evitar problemas
             db.expunge(aluno)
             return aluno
@@ -223,16 +221,13 @@ ultimo_uid_presenca = ""
 estado_lock = Lock()
 
 
-# ... (seu código de alunos e registros continua igual)
-# logging.basicConfig(level=logging.DEBUG)
-# logger = logging.getLogger(__name__)
-# ---------------- CONFIGURAÇÃO MQTT ----------------
+# ===== CONFIGURAÇÃO MQTT =====
 MQTT_BROKER = "brw.net.br"
 MQTT_TOPIC = "aluno/id"
 MQTT_USERNAME = "brware"
 MQTT_PASSWORD = "SQRT(pi)!=314"
 
-# ===== ALTERAÇÃO: NORMALIZAÇÃO DE UID NFC =====
+# ===== NORMALIZAÇÃO DE UID NFC =====
 def normalizar_uid(uid: str) -> str:
     """Normaliza o UID para comparação e armazenamento uniforme."""
     if not uid:
@@ -247,8 +242,6 @@ def normalizar_uid(uid: str) -> str:
 
 
 def ao_receber_mensagem(client, userdata, msg):
-    # logger.debug(f"[MQTT] Topico: {msg.topic}, mensagem: {msg.payload.decode()}")
-
     global ultimo_uid_cadastro, ultimo_uid_presenca
 
     uid_recebido = msg.payload.decode().strip()
@@ -256,7 +249,6 @@ def ao_receber_mensagem(client, userdata, msg):
 
     print(f"[MQTT] Mensagem recebida no tópico {msg.topic}: '{uid_recebido}'")
 
-    # ===== FASE 3: RECONHECIMENTO AUTOMÁTICO POR UID =====
     # Consulta banco para determinar se é cadastro ou presença
     aluno_encontrado = buscar_aluno_por_uid_db(uid_recebido)
     
@@ -477,17 +469,6 @@ def processar_fila() -> None:
 
 
 # ===== FUNÇÕES DE SUPORTE =====
-
-def buscar_aluno_por_uid(uid: str) -> Optional[Dict[str, str]]:
-    """
-    Busca um aluno pelo UID do cartão NFC no banco de dados.
-    Retorna um dicionário compatível com o código existente.
-    """
-    aluno = buscar_aluno_por_uid_db(uid)
-    if aluno:
-        return aluno.to_dict()
-    return None
-
 
 def definir_tipo_registro(ra: str) -> str:
     """
