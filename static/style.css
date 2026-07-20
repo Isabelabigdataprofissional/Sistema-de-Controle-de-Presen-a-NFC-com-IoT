@@ -28,6 +28,40 @@ h1 {
     gap: 20px;
 }
 
+.top-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.top-nav a {
+    padding: 10px 14px;
+    background: #2563eb;
+    color: white;
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+.top-nav a:hover {
+    opacity: 0.92;
+}
+
+.lista-historico {
+    list-style: none;
+    padding-left: 0;
+}
+
+.lista-historico li {
+    padding: 10px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.botao-perigo {
+    background: #dc2626;
+}
+
 .card {
     background: #ffffff;
     border-radius: 14px;

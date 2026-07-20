@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel da Chamada - Sistema de Chamada Escolar</title>
+    <title>Histórico de Chamadas - Sistema de Chamada Escolar</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -15,24 +15,11 @@
             <a href="{{ url_for('historico_page') }}">Histórico</a>
         </nav>
 
-        <h1>Painel da Chamada</h1>
-        <p class="subtitulo">Sistema Inteligente de Chamada Escolar por NFC.</p>
+        <h1>Histórico de Chamadas</h1>
+        <p class="subtitulo">Acompanhe as sessões já encerradas com disciplina, turma e professor.</p>
 
         <section class="card">
-            {% if sessao_aberta %}
-            <h2>Chamada em andamento</h2>
-            <p>Há uma chamada aberta no momento. Use a tela de chamada para gerenciar a sessão.</p>
-            <a href="{{ url_for('presenca_page') }}" class="botao-principal botao-presenca">Ir para Chamada</a>
-            {% else %}
-            <h2>Nenhuma chamada aberta</h2>
-            <p>Inicie uma nova chamada para começar o registro de presença.</p>
-            <a href="{{ url_for('presenca_page') }}" class="botao-principal botao-presenca">Iniciar Chamada</a>
-            {% endif %}
-        </section>
-
-        <section class="card">
-            <h2>Últimas chamadas</h2>
-            {% if sessoes_encerradas %}
+            {% if sessoes %}
             <table>
                 <thead>
                     <tr>
@@ -41,23 +28,24 @@
                         <th>Turma</th>
                         <th>Professor</th>
                         <th>Status</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for sessao in sessoes_encerradas %}
+                    {% for sessao in sessoes %}
                     <tr>
                         <td>{{ sessao.data }}</td>
                         <td>{{ sessao.disciplina }}</td>
                         <td>{{ sessao.turma }}</td>
                         <td>{{ sessao.professor }}</td>
                         <td>{{ sessao.status }}</td>
+                        <td><a href="{{ url_for('historico_sessao', sessao_id=sessao.id) }}" class="botao-secundario">Ver detalhes</a></td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
-            <a href="{{ url_for('historico_page') }}" class="botao-secundario">Ver todo o histórico</a>
             {% else %}
-            <p>Nenhuma chamada encerrada disponível.</p>
+            <p>Não há sessões encerradas para exibir.</p>
             {% endif %}
         </section>
     </div>

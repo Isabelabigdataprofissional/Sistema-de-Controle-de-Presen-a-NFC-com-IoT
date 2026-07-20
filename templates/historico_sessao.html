@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detalhes da Sessão - Sistema de Chamada Escolar</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <nav class="top-nav">
+            <a href="{{ url_for('index') }}">Início</a>
+            <a href="{{ url_for('presenca_page') }}">Chamada</a>
+            <a href="{{ url_for('alunos_page') }}">Alunos</a>
+            <a href="{{ url_for('historico_page') }}">Histórico</a>
+        </nav>
+
+        <h1>Detalhes da Sessão</h1>
+        <p class="subtitulo">Veja os alunos presentes registrados nesta chamada.</p>
+
+        <section class="card">
+            <p><strong>Disciplina:</strong> {{ sessao.disciplina }}</p>
+            <p><strong>Turma:</strong> {{ sessao.turma }}</p>
+            <p><strong>Professor:</strong> {{ sessao.professor }}</p>
+            <p><strong>Início:</strong> {{ sessao.hora_inicio }}</p>
+            <p><strong>Fim:</strong> {{ sessao.hora_fim }}</p>
+            <p><strong>Status:</strong> {{ sessao.status }}</p>
+        </section>
+
+        <section class="card">
+            <h2>Alunos presentes</h2>
+            {% if presencas %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Aluno</th>
+                        <th>UID</th>
+                        <th>Tipo</th>
+                        <th>Registrado em</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for presenca in presencas %}
+                    <tr>
+                        <td>{{ presenca.nome }}</td>
+                        <td>{{ presenca.uid }}</td>
+                        <td>{{ presenca.tipo }}</td>
+                        <td>{{ presenca.data_hora }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p>Nenhuma presença registrada nesta sessão.</p>
+            {% endif %}
+        </section>
+    </div>
+</body>
+</html>

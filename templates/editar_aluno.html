@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cadastro de Alunos - Sistema de Chamada Escolar</title>
+    <title>Editar Aluno - Sistema de Chamada Escolar</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -15,18 +15,16 @@
             <a href="{{ url_for('historico_page') }}">Histórico</a>
         </nav>
 
-        <h1>Cadastro de Aluno</h1>
-        <p class="subtitulo">Insira o UID NFC e os dados do aluno para habilitar a presença por leitura.</p>
+        <h1>Editar Aluno</h1>
+        <p class="subtitulo">Atualize os dados do aluno cadastrado por UID NFC.</p>
 
         <section class="card">
-            <form action="{{ url_for('cadastrar_aluno') }}" method="post">
+            <form action="{{ url_for('editar_aluno', ra=aluno.ra) }}" method="post">
                 <label>UID do Cartão</label>
-                    <input type="text" name="id_nfc" placeholder="UID NFC" required>
-                    <label>RA do Aluno</label>
-                    <input type="text" name="id_aluno" placeholder="RA do aluno" required>
+                <input type="text" name="uid" value="{{ aluno.uid }}" required>
                 <label>Nome</label>
-                <input type="text" name="nome" placeholder="Nome completo" required>
-                <button type="submit" class="botao-principal">Cadastrar Aluno</button>
+                <input type="text" name="nome" value="{{ aluno.nome }}" required>
+                <button type="submit" class="botao-principal">Salvar alterações</button>
             </form>
         </section>
     </div>

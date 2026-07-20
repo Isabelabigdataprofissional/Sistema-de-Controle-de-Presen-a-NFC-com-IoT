@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lista de Alunos - Sistema de Chamada Escolar</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <nav class="top-nav">
+            <a href="{{ url_for('index') }}">Início</a>
+            <a href="{{ url_for('presenca_page') }}">Chamada</a>
+            <a href="{{ url_for('alunos_page') }}">Alunos</a>
+            <a href="{{ url_for('historico_page') }}">Histórico</a>
+        </nav>
+
+        <h1>Alunos Cadastrados</h1>
+        <p class="subtitulo">Gerencie a lista de alunos registrados para as leituras NFC.</p>
+
+        <section class="card">
+            {% if alunos %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>UID NFC</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for aluno in alunos %}
+                    <tr>
+                        <td>{{ aluno.nome }}</td>
+                        <td>{{ aluno.uid }}</td>
+                        <td>
+                            <a href="{{ url_for('editar_aluno', ra=aluno.ra) }}" class="botao-secundario">Editar</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p>Nenhum aluno cadastrado ainda.</p>
+            {% endif %}
+        </section>
+    </div>
+</body>
+</html>

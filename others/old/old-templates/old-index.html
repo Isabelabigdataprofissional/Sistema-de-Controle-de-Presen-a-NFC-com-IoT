@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Dashboard - Sistema de Presença NFC</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Sistema IoT de Controle de Presença por NFC</h1>
+        <p class="subtitulo">Dashboard principal com navegação para cadastro e controle de presença.</p>
+
+        <div class="grid">
+            <section class="card">
+                <h2>Cadastro de Alunos</h2>
+                <p>Use esta área para abrir o formulário de cadastro de novo aluno por UID NFC.</p>
+                <a href="{{ url_for('cadastro_page') }}" class="botao-principal">Ir para Cadastro</a>
+            </section>
+
+            <section class="card">
+                <h2>Controle de Presença</h2>
+                <p>Veja o painel de presença, o histórico de leituras e o status do sistema.</p>
+                <a href="{{ url_for('presenca_page') }}" class="botao-principal botao-presenca">Ir para Presença</a>
+            </section>
+        </div>
+    </div>

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from flask import Flask, redirect, render_template, request, url_for, jsonify
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
 import paho.mqtt.client as mqtt
@@ -12,7 +12,7 @@ import time
 from queue import Queue, Empty
 from threading import Thread, Lock
 
-from models import Base, Aluno, Presenca, SessaoChamada
+from models import Base, Aluno, Presenca
 
 app = Flask(__name__)
 
@@ -21,115 +21,14 @@ DATABASE_URL = "sqlite:///presenca.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Cria as tabelas automaticamente se não existirem e aplica migrações necessárias
-
-def executar_migracoes() -> None:
-    """Cria tabelas novas e atualiza a estrutura existente do banco."""
-    Base.metadata.create_all(bind=engine)
-
-    with engine.begin() as conn:
-        resultado = conn.execute(text("PRAGMA table_info(presencas)")).fetchall()
-        colunas = [linha[1] for linha in resultado]
-        if "sessao_id" not in colunas:
-            conn.execute(text("ALTER TABLE presencas ADD COLUMN sessao_id INTEGER"))
-            print("[DB_MIGRACAO] Coluna sessao_id adicionada em presencas")
-
-    with engine.begin() as conn:
-        resultado = conn.execute(text("PRAGMA table_info(sessoes_chamada)")).fetchall()
-        colunas = [linha[1] for linha in resultado]
-        if "disciplina" not in colunas:
-            conn.execute(text("ALTER TABLE sessoes_chamada ADD COLUMN disciplina VARCHAR(200) NOT NULL DEFAULT ''"))
-            print("[DB_MIGRACAO] Coluna disciplina adicionada em sessoes_chamada")
-        if "turma" not in colunas:
-            conn.execute(text("ALTER TABLE sessoes_chamada ADD COLUMN turma VARCHAR(100) NOT NULL DEFAULT ''"))
-            print("[DB_MIGRACAO] Coluna turma adicionada em sessoes_chamada")
-        if "professor" not in colunas:
-            conn.execute(text("ALTER TABLE sessoes_chamada ADD COLUMN professor VARCHAR(200) NOT NULL DEFAULT ''"))
-            print("[DB_MIGRACAO] Coluna professor adicionada em sessoes_chamada")
-
-executar_migracoes()
+# Cria as tabelas automaticamente se não existirem
+Base.metadata.create_all(bind=engine)
 print("[DB] Tabelas criadas/verificadas com sucesso")
 
 
 def get_db_session() -> Session:
     """Retorna uma nova sessão de banco de dados."""
     return SessionLocal()
-
-
-def obter_sessao_aberta_db() -> Optional[SessaoChamada]:
-    """Retorna a sessão de chamada escolar que estiver aberta, se existir."""
-    db = get_db_session()
-    try:
-        sessao = (
-            db.query(SessaoChamada)
-            .filter(SessaoChamada.status == "ABERTA")
-            .order_by(SessaoChamada.id.desc())
-            .first()
-        )
-        if sessao:
-            db.expunge(sessao)
-        return sessao
-    finally:
-        db.close()
-
-
-def abrir_chamada_db(disciplina: str, turma: str, professor: str) -> SessaoChamada:
-    """Cria uma nova sessão de chamada aberta."""
-    db = get_db_session()
-    try:
-        agora = datetime.now()
-        sessao = SessaoChamada(
-            data=agora.strftime("%d/%m/%Y"),
-            hora_inicio=agora.strftime("%H:%M:%S"),
-            status="ABERTA",
-            disciplina=disciplina,
-            turma=turma,
-            professor=professor,
-        )
-        db.add(sessao)
-        db.commit()
-        db.refresh(sessao)
-        print(
-            f"[CHAMADA] Sessão de chamada aberta: id={sessao.id} data={sessao.data} "
-            f"hora_inicio={sessao.hora_inicio} disciplina={sessao.disciplina} turma={sessao.turma} "
-            f"professor={sessao.professor}"
-        )
-        return sessao
-    except Exception as e:
-        db.rollback()
-        print(f"[CHAMADA] Erro ao abrir chamada: {e}")
-        raise
-    finally:
-        db.close()
-
-
-def encerrar_chamada_db() -> Optional[SessaoChamada]:
-    """Encerra a sessão de chamada atualmente aberta."""
-    db = get_db_session()
-    try:
-        sessao = (
-            db.query(SessaoChamada)
-            .filter(SessaoChamada.status == "ABERTA")
-            .order_by(SessaoChamada.id.desc())
-            .first()
-        )
-        if not sessao:
-            print("[CHAMADA] Nenhuma chamada aberta para encerrar")
-            return None
-
-        agora = datetime.now()
-        sessao.status = "ENCERRADA"
-        sessao.hora_fim = agora.strftime("%H:%M:%S")
-        db.commit()
-        print(f"[CHAMADA] Sessão de chamada encerrada: id={sessao.id}")
-        db.expunge(sessao)
-        return sessao
-    except Exception as e:
-        db.rollback()
-        print(f"[CHAMADA] Erro ao encerrar chamada: {e}")
-        return None
-    finally:
-        db.close()
 
 
 # ===== FUNÇÕES DE BANCO DE DADOS - ALUNOS =====
@@ -192,49 +91,81 @@ def criar_aluno(ra: str, nome: str, id_nfc: str) -> bool:
 
 # ===== FUNÇÕES DE BANCO DE DADOS - PRESENÇA =====
 
-def presenca_existe_na_sessao(ra: str, sessao_id: int) -> bool:
-    """Verifica se o aluno já registrou presença na sessão de chamada atual."""
+def buscar_ultima_presenca_db(ra: str) -> Optional[Presenca]:
+    """Busca a última presença registrada de um aluno pelo RA."""
     db = get_db_session()
     try:
-        return (
+        print(f"[DB_PRESENCA] Procurando última presença para RA='{ra}'")
+        ultima_presenca = (
             db.query(Presenca)
-            .filter(Presenca.ra == ra, Presenca.sessao_id == sessao_id)
-            .first()
-            is not None
-        )
-    finally:
-        db.close()
-
-
-def obter_hora_presenca_na_sessao(ra: str, sessao_id: int) -> str:
-    db = get_db_session()
-    try:
-        presenca = (
-            db.query(Presenca)
-            .filter(Presenca.ra == ra, Presenca.sessao_id == sessao_id)
+            .filter(Presenca.ra == ra)
             .order_by(Presenca.criado_em.desc())
             .first()
         )
-        return presenca.data_hora if presenca else "-"
+        if ultima_presenca:
+            print(f"[DB_PRESENCA] Encontrada: tipo='{ultima_presenca.tipo}' data_hora='{ultima_presenca.data_hora}'")
+            db.expunge(ultima_presenca)
+            return ultima_presenca
+        else:
+            print(f"[DB_PRESENCA] Nenhuma presença anterior encontrada para RA='{ra}'")
+            return None
     finally:
         db.close()
 
 
-def registrar_presenca_bd(ra: str, sessao_id: int, data_hora: str, tipo: str = "presenca") -> bool:
+def verificar_anti_duplicidade_40min(ra: str) -> tuple[bool, str]:
+    """
+    Verifica se pode registrar uma nova presença considerando janela de 40 minutos.
+    
+    Retorna:
+        (pode_registrar: bool, motivo: str)
+        - (True, "OK") - pode registrar
+        - (False, "motivo") - não pode registrar
+    """
+    ultima_presenca = buscar_ultima_presenca_db(ra)
+    
+    if not ultima_presenca:
+        print(f"[ANTI_DUP] RA='{ra}': primeira presença, autorizado")
+        return True, "Primeira presença"
+    
+    # Parse data_hora do formato "DD/MM/YYYY HH:MM:SS"
+    try:
+        ultima_data = datetime.strptime(ultima_presenca.data_hora, "%d/%m/%Y %H:%M:%S")
+        agora = datetime.now()
+        diferenca_minutos = (agora - ultima_data).total_seconds() / 60
+        
+        print(f"[ANTI_DUP] RA='{ra}': última presença há {diferenca_minutos:.1f} minutos")
+        
+        if diferenca_minutos < 40:
+            motivo = f"Presença já registrada há {int(diferenca_minutos)} minutos. Aguarde 40 minutos."
+            print(f"[ANTI_DUP] RA='{ra}': {motivo}")
+            return False, motivo
+        else:
+            print(f"[ANTI_DUP] RA='{ra}': janela de 40 min atendida, autorizado")
+            return True, "Autorizado após 40 minutos"
+    except Exception as e:
+        print(f"[ANTI_DUP] Erro ao processar data: {e}")
+        return True, "Erro em verificação (autorizado por segurança)"
+
+
+def registrar_presenca_bd(ra: str, tipo: str, data_hora: str) -> bool:
     """
     Registra uma nova presença no banco de dados.
+    
+    Args:
+        ra: RA do aluno
+        tipo: "entrada", "saida", "erro", "ignorado"
+        data_hora: string no formato "DD/MM/YYYY HH:MM:SS"
+    
+    Returns:
+        True se registrado com sucesso, False caso contrário
     """
     db = get_db_session()
     try:
-        nova_presenca = Presenca(
-            ra=ra,
-            sessao_id=sessao_id,
-            data_hora=data_hora,
-            tipo=tipo,
-        )
+        nova_presenca = Presenca(ra=ra, tipo=tipo, data_hora=data_hora)
         db.add(nova_presenca)
         db.commit()
-        print(f"[DB_PRESENCA_REG] Presença registrada: ra='{ra}' sessao_id={sessao_id} data_hora='{data_hora}'")
+        print(f"[DB_PRESENCA_REG] Presença registrada: ra='{ra}' tipo='{tipo}' data_hora='{data_hora}'")
         return True
     except Exception as e:
         print(f"[DB_PRESENCA_REG] Erro ao registrar presença: {e}")
@@ -270,84 +201,6 @@ def obter_presencas_db(ra: str = None, limite: int = None) -> List[Dict]:
         
         print(f"[DB_PRESENCA_OBTER] Retornando {len(resultado)} presencas")
         return resultado
-    finally:
-        db.close()
-
-
-def obter_sessao_por_id(sessao_id: int) -> Optional[SessaoChamada]:
-    db = get_db_session()
-    try:
-        sessao = db.query(SessaoChamada).filter(SessaoChamada.id == sessao_id).first()
-        if sessao:
-            db.expunge(sessao)
-        return sessao
-    finally:
-        db.close()
-
-
-def obter_sessoes_encerradas_db(limite: int = None) -> List[Dict[str, str]]:
-    db = get_db_session()
-    try:
-        query = db.query(SessaoChamada).filter(SessaoChamada.status == "ENCERRADA").order_by(SessaoChamada.id.desc())
-        if limite:
-            query = query.limit(limite)
-        sessoes = query.all()
-        resultado = [sessao.to_dict() for sessao in sessoes]
-        print(f"[DB_CHAMADA_OBTER] Retornando {len(resultado)} sessoes encerradas")
-        return resultado
-    finally:
-        db.close()
-
-
-def obter_presencas_da_sessao(sessao_id: int) -> List[Dict[str, str]]:
-    db = get_db_session()
-    try:
-        presencas = (
-            db.query(Presenca)
-            .filter(Presenca.sessao_id == sessao_id)
-            .order_by(Presenca.criado_em.asc())
-            .all()
-        )
-        resultado = [p.to_dict() for p in presencas]
-        print(f"[DB_CHAMADA_PRESENCA] Retornando {len(resultado)} presencas para sessao_id={sessao_id}")
-        return resultado
-    finally:
-        db.close()
-
-
-def atualizar_aluno(ra: str, nome: str, id_nfc: str) -> bool:
-    db = get_db_session()
-    try:
-        aluno = db.query(Aluno).filter(Aluno.ra == ra).first()
-        if not aluno:
-            return False
-        aluno.nome = nome
-        aluno.id_nfc = normalizar_uid(id_nfc)
-        db.commit()
-        print(f"[DB_ALUNO] Aluno atualizado: RA='{ra}' nome='{nome}' id_nfc='{id_nfc}'")
-        return True
-    except Exception as e:
-        db.rollback()
-        print(f"[DB_ALUNO] Erro ao atualizar aluno: {e}")
-        return False
-    finally:
-        db.close()
-
-
-def excluir_aluno_db(ra: str) -> bool:
-    db = get_db_session()
-    try:
-        aluno = db.query(Aluno).filter(Aluno.ra == ra).first()
-        if not aluno:
-            return False
-        db.delete(aluno)
-        db.commit()
-        print(f"[DB_ALUNO] Aluno excluído: RA='{ra}'")
-        return True
-    except Exception as e:
-        db.rollback()
-        print(f"[DB_ALUNO] Erro ao excluir aluno: {e}")
-        return False
     finally:
         db.close()
 
@@ -488,43 +341,33 @@ def registrar_evento_historico(
 
 
 def processar_presenca(uid: str) -> None:
-    """Processa a presença de um aluno em uma chamada escolar."""
+    """
+    FASE 4: Processa automaticamente a presença com anti-duplicidade de 40 minutos.
+    
+    Fluxo:
+    1. Busca aluno pelo UID
+    2. Se não encontrado: registra como erro
+    3. Se encontrado:
+       a. Verifica janela anti-duplicidade de 40 minutos
+       b. Se dentro da janela: ignora (presença já registrada)
+       c. Se fora da janela: define tipo (entrada/saída) e registra em BD
+    """
     agora = datetime.now()
     agora_formatada = agora.strftime("%d/%m/%Y %H:%M:%S")
-
+    
     print(f"[PRESENCA] Processando UID='{uid}'")
-
-    sessao = obter_sessao_aberta_db()
-    if not sessao:
-        situacao = "Não existe chamada aberta."
-        print(f"[PRESENCA] UID='{uid}': {situacao}")
-        registrar_evento_historico(
-            uid=uid,
-            ra="-",
-            nome="Sem chamada aberta",
-            destino="presenca",
-            situacao=situacao,
-            tipo="ignorado",
-        )
-        with estado_lock:
-            ultimo_evento_presenca["uid"] = uid
-            ultimo_evento_presenca["ra"] = "-"
-            ultimo_evento_presenca["nome"] = "Sem chamada aberta"
-            ultimo_evento_presenca["data_hora"] = agora_formatada
-            ultimo_evento_presenca["situacao"] = situacao
-            ultimo_evento_presenca["tipo"] = "ignorado"
-        return
-
+    
+    # Busca aluno no banco
     aluno = buscar_aluno_por_uid_db(uid)
+    
     if aluno is None:
-        situacao = "Aluno não encontrado"
-        print(f"[PRESENCA] UID='{uid}': {situacao}")
+        print(f"[PRESENCA] Aluno não encontrado para UID='{uid}'")
         registrar_evento_historico(
             uid=uid,
             ra="-",
             nome="Cartão não identificado",
             destino="presenca",
-            situacao=situacao,
+            situacao="Aluno não encontrado",
             tipo="erro",
         )
         with estado_lock:
@@ -532,20 +375,22 @@ def processar_presenca(uid: str) -> None:
             ultimo_evento_presenca["ra"] = "-"
             ultimo_evento_presenca["nome"] = "Cartão não identificado"
             ultimo_evento_presenca["data_hora"] = agora_formatada
-            ultimo_evento_presenca["situacao"] = situacao
+            ultimo_evento_presenca["situacao"] = "Aluno não encontrado"
             ultimo_evento_presenca["tipo"] = "erro"
         return
-
+    
+    # Aluno encontrado: verifica anti-duplicidade
     ra = aluno.ra
-    if presenca_existe_na_sessao(ra, sessao.id):
-        situacao = "Presença já registrada nesta chamada."
-        print(f"[PRESENCA] RA='{ra}': {situacao}")
+    pode_registrar, motivo = verificar_anti_duplicidade_40min(ra)
+    
+    if not pode_registrar:
+        print(f"[PRESENCA] RA='{ra}': {motivo}")
         registrar_evento_historico(
             uid=uid,
             ra=ra,
             nome=aluno.nome,
             destino="presenca",
-            situacao=situacao,
+            situacao=motivo,
             tipo="ignorado",
         )
         with estado_lock:
@@ -553,40 +398,38 @@ def processar_presenca(uid: str) -> None:
             ultimo_evento_presenca["ra"] = ra
             ultimo_evento_presenca["nome"] = aluno.nome
             ultimo_evento_presenca["data_hora"] = agora_formatada
-            ultimo_evento_presenca["situacao"] = situacao
+            ultimo_evento_presenca["situacao"] = motivo
             ultimo_evento_presenca["tipo"] = "ignorado"
         return
-
-    sucesso = registrar_presenca_bd(
-        ra=ra,
-        sessao_id=sessao.id,
-        data_hora=agora_formatada,
-        tipo="presenca",
-    )
-
+    
+    # Pode registrar: define tipo e registra no BD
+    tipo = definir_tipo_registro(ra)
+    sucesso = registrar_presenca_bd(ra=ra, tipo=tipo, data_hora=agora_formatada)
+    
     if sucesso:
-        situacao = "Presença registrada nesta chamada."
-        print(f"[PRESENCA] RA='{ra}': presença registrada na chamada")
+        situacao = f"Presença registrada como {tipo}"
+        print(f"[PRESENCA] RA='{ra}': presença registrada ({tipo})")
     else:
         situacao = "Erro ao registrar no banco"
+        tipo = "erro"
         print(f"[PRESENCA] RA='{ra}': erro ao registrar")
-
+    
     registrar_evento_historico(
         uid=uid,
         ra=ra,
         nome=aluno.nome,
         destino="presenca",
         situacao=situacao,
-        tipo="presenca" if sucesso else "erro",
+        tipo=tipo,
     )
-
+    
     with estado_lock:
         ultimo_evento_presenca["uid"] = uid
         ultimo_evento_presenca["ra"] = ra
         ultimo_evento_presenca["nome"] = aluno.nome
         ultimo_evento_presenca["data_hora"] = agora_formatada
         ultimo_evento_presenca["situacao"] = situacao
-        ultimo_evento_presenca["tipo"] = "presenca" if sucesso else "erro"
+        ultimo_evento_presenca["tipo"] = tipo
 
 
 def processar_fila() -> None:
@@ -627,20 +470,49 @@ def processar_fila() -> None:
 
 # ===== FUNÇÕES DE SUPORTE =====
 
-def calcular_lista_presenca() -> List[Dict[str, str]]:
-    """Retorna a lista de presença atual dos alunos na sessão de chamada aberta."""
-    lista_presenca: List[Dict[str, str]] = []
-    sessao = obter_sessao_aberta_db()
-    sessao_id = sessao.id if sessao else None
+def definir_tipo_registro(ra: str) -> str:
+    """
+    FASE 4: Define se o próximo registro será entrada ou saída consultando o BD.
+    
+    Regra:
+    - Se não houver registro anterior: entrada (primeira presença)
+    - Se último registro foi entrada: saída
+    - Caso contrário: entrada
+    """
+    ultima_presenca = buscar_ultima_presenca_db(ra)
+    
+    if not ultima_presenca:
+        print(f"[TIPO] RA='{ra}': primeira presença, tipo=entrada")
+        return "entrada"
+    
+    tipo_resultado = "saida" if ultima_presenca.tipo == "entrada" else "entrada"
+    print(f"[TIPO] RA='{ra}': último={ultima_presenca.tipo}, próximo={tipo_resultado}")
+    return tipo_resultado
 
-    for aluno in obter_todos_alunos():
-        presente = sessao_id is not None and presenca_existe_na_sessao(aluno["ra"], sessao_id)
-        status = "Presente" if presente else "Ausente"
-        ultima_hora = (
-            obter_hora_presenca_na_sessao(aluno["ra"], sessao_id)
-            if presente
-            else "-"
-        )
+
+def calcular_lista_presenca() -> List[Dict[str, str]]:
+    """
+    FASE 4: Retorna a lista de presença atual de cada aluno consultando o BD.
+    
+    Para cada aluno:
+    - Busca última presença no BD
+    - Se último tipo foi entrada: Presente
+    - Se último tipo foi saída: Ausente
+    - Se não há presença: Ausente
+    """
+    lista_presenca: List[Dict[str, str]] = []
+    alunos = obter_todos_alunos()
+
+    for aluno in alunos:
+        ra = aluno["ra"]
+        ultima_presenca = buscar_ultima_presenca_db(ra)
+        
+        if ultima_presenca and ultima_presenca.tipo in {"entrada", "saida"}:
+            status = "Presente" if ultima_presenca.tipo == "entrada" else "Ausente"
+            ultima_hora = ultima_presenca.data_hora
+        else:
+            status = "Ausente"
+            ultima_hora = "-"
 
         lista_presenca.append(
             {
@@ -657,13 +529,16 @@ def calcular_lista_presenca() -> List[Dict[str, str]]:
 
 @app.route("/", methods=["GET"])
 def index():
-    sessao_aberta = obter_sessao_aberta_db()
-    sessoes_encerradas = obter_sessoes_encerradas_db(limite=5)
+    lista_presenca = calcular_lista_presenca()
+    presentes = sum(1 for item in lista_presenca if item["status"] == "Presente")
+    presencas_recentes = obter_presencas_db(limite=20)
 
     return render_template(
         "index.html",
-        sessao_aberta=sessao_aberta,
-        sessoes_encerradas=sessoes_encerradas,
+        alunos=obter_todos_alunos(),
+        registros=presencas_recentes,
+        lista_presenca=lista_presenca,
+        total_presentes=presentes,
     )
 
 @app.route("/cadastro", methods=["GET"])
@@ -676,30 +551,20 @@ def cadastro_page():
 
 @app.route("/presenca", methods=["GET"])
 def presenca_page():
-    sessao_aberta = obter_sessao_aberta_db()
     lista_presenca = calcular_lista_presenca()
     presentes = sum(1 for item in lista_presenca if item["status"] == "Presente")
     presencas_recentes = obter_presencas_db(limite=50)
-    presentes_lista = [item for item in lista_presenca if item["status"] == "Presente"]
 
     with estado_lock:
         historico_recente = historico_leituras[-10:]
-        ultimo_evento = ultimo_evento_presenca.copy()
 
     return render_template(
         "presenca.html",
         registros=presencas_recentes,
         lista_presenca=lista_presenca,
-        presentes_lista=presentes_lista,
         total_presentes=presentes,
         ultimo_uid_presenca=ultimo_uid_presenca,
-        ultimo_evento_presenca=ultimo_evento,
         historico_recente=historico_recente,
-        sessao_aberta=sessao_aberta is not None,
-        sessao=sessao_aberta,
-        status_chamada=sessao_aberta.status if sessao_aberta else "Nenhuma chamada aberta",
-        hora_inicio=sessao_aberta.hora_inicio if sessao_aberta else "-",
-        hora_fim=sessao_aberta.hora_fim if sessao_aberta else "-",
     )
 
 @app.route("/status_presenca", methods=["GET"])
@@ -714,8 +579,6 @@ def status_presenca():
         ultimo_uid = ultimo_uid_presenca
         fila_tamanho = fila_uids.qsize()
 
-    sessao_aberta = obter_sessao_aberta_db()
-
     return jsonify(
         {
             "status_sistema": "online",
@@ -726,81 +589,8 @@ def status_presenca():
             "lista_presenca": lista_presenca,
             "historico_recente": historico_recente,
             "fila_tamanho": fila_tamanho,
-            "sessao_aberta": sessao_aberta is not None,
-            "status_chamada": sessao_aberta.status if sessao_aberta else "Nenhuma chamada aberta",
-            "hora_inicio": sessao_aberta.hora_inicio if sessao_aberta else "-",
-            "hora_fim": sessao_aberta.hora_fim if sessao_aberta else "-",
-            "disciplina": sessao_aberta.disciplina if sessao_aberta else "-",
-            "turma": sessao_aberta.turma if sessao_aberta else "-",
-            "professor": sessao_aberta.professor if sessao_aberta else "-",
         }
     )
-
-
-@app.route("/abrir_chamada", methods=["POST"])
-def abrir_chamada():
-    if not obter_sessao_aberta_db():
-        disciplina = request.form.get("disciplina", "").strip()
-        turma = request.form.get("turma", "").strip()
-        professor = request.form.get("professor", "").strip()
-        if disciplina and turma and professor:
-            abrir_chamada_db(disciplina=disciplina, turma=turma, professor=professor)
-    return redirect(url_for("presenca_page"))
-
-
-@app.route("/encerrar_chamada", methods=["POST"])
-def encerrar_chamada():
-    encerrar_chamada_db()
-    return redirect(url_for("presenca_page"))
-
-
-@app.route("/alunos", methods=["GET"])
-def alunos_page():
-    return render_template(
-        "alunos.html",
-        alunos=obter_todos_alunos(),
-    )
-
-
-@app.route("/editar_aluno/<string:ra>", methods=["GET", "POST"])
-def editar_aluno(ra: str):
-    if request.method == "POST":
-        nome = request.form.get("nome", "").strip()
-        id_nfc = request.form.get("id_nfc", "").strip()
-        if nome and id_nfc:
-            atualizar_aluno(ra, nome, id_nfc)
-        return redirect(url_for("alunos_page"))
-
-    db = get_db_session()
-    try:
-        aluno = db.query(Aluno).filter(Aluno.ra == ra).first()
-        if not aluno:
-            return redirect(url_for("alunos_page"))
-        return render_template("editar_aluno.html", aluno=aluno)
-    finally:
-        db.close()
-
-
-@app.route("/excluir_aluno/<string:ra>", methods=["POST"])
-def excluir_aluno(ra: str):
-    excluir_aluno_db(ra)
-    return redirect(url_for("alunos_page"))
-
-
-@app.route("/historico", methods=["GET"])
-def historico_page():
-    sessoes = obter_sessoes_encerradas_db(limite=20)
-    return render_template("historico.html", sessoes=sessoes)
-
-
-@app.route("/historico/<int:sessao_id>", methods=["GET"])
-def historico_sessao(sessao_id: int):
-    sessao = obter_sessao_por_id(sessao_id)
-    if not sessao:
-        return redirect(url_for("historico_page"))
-    presencas = obter_presencas_da_sessao(sessao_id)
-    return render_template("historico_sessao.html", sessao=sessao, presencas=presencas)
-
 
 @app.route("/cadastrar_aluno", methods=["POST"])
 def cadastrar_aluno():
@@ -815,7 +605,11 @@ def cadastrar_aluno():
         sucesso = criar_aluno(ra, nome, id_nfc)
         
         if sucesso:
-            print(f"[CADASTRO] Aluno cadastrado: RA='{ra}' nome='{nome}'")
+            # ===== FASE 4: REGISTRO AUTOMÁTICO DE PRESENÇA APÓS CADASTRO =====
+            print(f"[CADASTRO] Registrando presença automaticamente para UID='{id_nfc}'")
+            processar_presenca(id_nfc)
+
+            # Limpa o UID após cadastro
             ultimo_uid_cadastro = ""
         else:
             print(f"[CADASTRO] Falha ao cadastrar aluno (UID pode estar duplicado)")
