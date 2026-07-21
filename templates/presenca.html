@@ -66,17 +66,7 @@
             {% endif %}
         </section>
 
-        <section class="card">
-            <h2>Registro manual</h2>
-            <p>Use este formulário para registrar um aluno manualmente caso o NFC não esteja disponível.</p>
-            <form action="{{ url_for('registrar_presenca') }}" method="post">
-                <label>UID do Cartão</label>
-                <input type="text" name="uid" placeholder="UID NFC" required>
-                <label>Nome do aluno</label>
-                <input type="text" name="nome" placeholder="Nome do aluno" required>
-                <button type="submit" class="botao-principal">Registrar Presença</button>
-            </form>
-        </section>
+        <!-- Registro manual removido: registros agora são feitos apenas por leitura NFC ou pela página de cadastro -->
         {% else %}
         {% if ultima_sessao_encerrada %}
         <section class="card">

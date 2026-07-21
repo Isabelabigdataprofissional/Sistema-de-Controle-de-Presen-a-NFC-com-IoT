@@ -19,15 +19,43 @@
         <p class="subtitulo">Insira o UID NFC e os dados do aluno para habilitar a presença por leitura.</p>
 
         <section class="card">
-            <form action="{{ url_for('cadastrar_aluno') }}" method="post">
+            <form action="{{ url_for('cadastrar_aluno') }}" method="post" id="form_cadastro">
                 <label>RA do Aluno</label>
                 <input type="text" name="id_aluno" placeholder="RA do aluno" required>
                 <label>Nome</label>
                 <input type="text" name="nome" placeholder="Nome completo" required>
-                <label>UID do Cartão</label>
-                <input type="text" name="id_nfc" placeholder="UID NFC" required>
-                <button type="submit" class="botao-principal">Cadastrar Aluno</button>
+                <label>UID do Cartão (detectado)</label>
+                <input type="text" name="id_nfc" id="id_nfc" value="{{ ultimo_uid_cadastro }}" readonly placeholder="Aguardando leitura do sensor">
+                <button type="submit" class="botao-principal" id="btn_cadastrar">Cadastrar Aluno</button>
             </form>
+            <script>
+                (function(){
+                    const input = document.getElementById('id_nfc');
+                    const btn = document.getElementById('btn_cadastrar');
+                    function atualizar(){
+                        if(!input.value || input.value.trim()===''){
+                            btn.disabled = true;
+                            btn.title = 'Aguardando leitura do sensor (UID)';
+                        } else {
+                            btn.disabled = false;
+                            btn.title = '';
+                        }
+                    }
+                    atualizar();
+                    // opcional: atualiza a cada 3s consultando o status (se a rota /status_presenca expuser o uid)
+                    setInterval(function(){
+                        fetch('/status_presenca').then(r=>r.json()).then(j=>{
+                            if(j && j.ultimo_cartao_lido){
+                                const v = j.ultimo_cartao_lido;
+                                if(v && v.trim() && input.value!==v){
+                                    input.value = v;
+                                }
+                            }
+                            atualizar();
+                        }).catch(()=>{});
+                    },3000);
+                })();
+            </script>
         </section>
     </div>
 </body>
