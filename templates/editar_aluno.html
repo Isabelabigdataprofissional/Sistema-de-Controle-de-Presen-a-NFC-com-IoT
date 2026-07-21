@@ -20,8 +20,10 @@
 
         <section class="card">
             <form action="{{ url_for('editar_aluno', ra=aluno.ra) }}" method="post">
+                <label>RA do Aluno</label>
+                <input type="text" value="{{ aluno.ra }}" disabled>
                 <label>UID do Cartão</label>
-                <input type="text" name="uid" value="{{ aluno.uid }}" required>
+                <input type="text" name="id_nfc" value="{{ aluno.uid }}" required>
                 <label>Nome</label>
                 <input type="text" name="nome" value="{{ aluno.nome }}" required>
                 <button type="submit" class="botao-principal">Salvar alterações</button>

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Dict, List, Optional
+import io
 
-from flask import Flask, redirect, render_template, request, url_for, jsonify
+from flask import Flask, Response, redirect, render_template, request, url_for, jsonify
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -315,6 +316,110 @@ def obter_presencas_da_sessao(sessao_id: int) -> List[Dict[str, str]]:
         db.close()
 
 
+def obter_ultima_sessao_encerrada_db() -> Optional[SessaoChamada]:
+    db = get_db_session()
+    try:
+        sessao = (
+            db.query(SessaoChamada)
+            .filter(SessaoChamada.status == "ENCERRADA")
+            .order_by(SessaoChamada.id.desc())
+            .first()
+        )
+        if sessao:
+            db.expunge(sessao)
+        return sessao
+    finally:
+        db.close()
+
+
+def criar_texto_presenca(sessao: SessaoChamada, presencas: List[Dict[str, str]]) -> bytes:
+    cabecalho = [
+        "FATEC IPIRANGA",
+        "Lista de Presença",
+        f"Disciplina: {sessao.disciplina}",
+        f"Turma: {sessao.turma}",
+        f"Professor: {sessao.professor}",
+        f"Data: {sessao.data}",
+        f"Início: {sessao.hora_inicio}",
+        f"Fim: {sessao.hora_fim or '-'}",
+        "",
+        "RA | Nome | Horário",
+        "----------------------------------------",
+    ]
+    linhas = cabecalho[:]
+    for presenca in presencas:
+        linhas.append(f"{presenca['ra']} | {presenca['nome']} | {presenca['data_hora']}")
+    texto = "\n".join(linhas) + "\n"
+    return texto.encode("utf-8")
+
+
+def _pdf_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def criar_pdf_presenca(sessao: SessaoChamada, presencas: List[Dict[str, str]]) -> bytes:
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    except Exception:
+        # Se ReportLab não estiver instalado, retorna o TXT como fallback
+        return criar_texto_presenca(sessao, presencas)
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=60, bottomMargin=40)
+    styles = getSampleStyleSheet()
+
+    elementos = []
+    elementos.append(Paragraph("FATEC IPIRANGA", styles["Title"]))
+    elementos.append(Paragraph("Lista de Presença", styles["Heading2"]))
+    elementos.append(Spacer(1, 12))
+
+    info_text = (
+        f"Disciplina: {sessao.disciplina} | Turma: {sessao.turma} | Professor: {sessao.professor}"
+        f"<br/>Data: {sessao.data} | Início: {sessao.hora_inicio} | Fim: {sessao.hora_fim or '-'}"
+    )
+    elementos.append(Paragraph(info_text, styles["Normal"]))
+    elementos.append(Spacer(1, 12))
+
+    tabela_dados = [["RA", "Nome", "Horário"]]
+    for p in presencas:
+        tabela_dados.append([p.get("ra", "-"), p.get("nome", "-"), p.get("data_hora", "-")])
+
+    tabela = Table(tabela_dados, colWidths=[80, 320, 120])
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+    ]))
+
+    elementos.append(tabela)
+
+    doc.build(elementos)
+    return buffer.getvalue()
+
+
+def exportar_presenca_por_sessao(sessao_id: int, formato: str = "pdf") -> Response:
+    sessao = obter_sessao_por_id(sessao_id)
+    if not sessao:
+        return redirect(url_for("historico_page"))
+
+    presencas = obter_presencas_da_sessao(sessao_id)
+    if formato == "txt":
+        data_bytes = criar_texto_presenca(sessao, presencas)
+        response = Response(data_bytes, mimetype="text/plain; charset=utf-8")
+        nome_arquivo = f"lista_presenca_{sessao.data.replace('/', '-')}_{sessao.id}.txt"
+    else:
+        data_bytes = criar_pdf_presenca(sessao, presencas)
+        response = Response(data_bytes, mimetype="application/pdf")
+        nome_arquivo = f"lista_presenca_{sessao.data.replace('/', '-')}_{sessao.id}.pdf"
+
+    response.headers["Content-Disposition"] = f"attachment; filename={nome_arquivo}"
+    return response
+
+
 def atualizar_aluno(ra: str, nome: str, id_nfc: str) -> bool:
     db = get_db_session()
     try:
@@ -365,6 +470,7 @@ ultimo_evento_presenca: Dict[str, str] = {
 }
 ultimo_uid_cadastro = ""
 ultimo_uid_presenca = ""
+ultima_sessao_encerrada_id: Optional[int] = None
 estado_lock = Lock()
 
 
@@ -686,6 +792,10 @@ def presenca_page():
         historico_recente = historico_leituras[-10:]
         ultimo_evento = ultimo_evento_presenca.copy()
 
+    ultima_sessao_encerrada = None
+    if not sessao_aberta and ultima_sessao_encerrada_id:
+        ultima_sessao_encerrada = obter_ultima_sessao_encerrada_db()
+
     return render_template(
         "presenca.html",
         registros=presencas_recentes,
@@ -697,6 +807,7 @@ def presenca_page():
         historico_recente=historico_recente,
         sessao_aberta=sessao_aberta is not None,
         sessao=sessao_aberta,
+        ultima_sessao_encerrada=ultima_sessao_encerrada,
         status_chamada=sessao_aberta.status if sessao_aberta else "Nenhuma chamada aberta",
         hora_inicio=sessao_aberta.hora_inicio if sessao_aberta else "-",
         hora_fim=sessao_aberta.hora_fim if sessao_aberta else "-",
@@ -739,18 +850,23 @@ def status_presenca():
 
 @app.route("/abrir_chamada", methods=["POST"])
 def abrir_chamada():
+    global ultima_sessao_encerrada_id
     if not obter_sessao_aberta_db():
         disciplina = request.form.get("disciplina", "").strip()
         turma = request.form.get("turma", "").strip()
         professor = request.form.get("professor", "").strip()
         if disciplina and turma and professor:
             abrir_chamada_db(disciplina=disciplina, turma=turma, professor=professor)
+            ultima_sessao_encerrada_id = None
     return redirect(url_for("presenca_page"))
 
 
 @app.route("/encerrar_chamada", methods=["POST"])
 def encerrar_chamada():
-    encerrar_chamada_db()
+    global ultima_sessao_encerrada_id
+    sessao = encerrar_chamada_db()
+    if sessao:
+        ultima_sessao_encerrada_id = sessao.id
     return redirect(url_for("presenca_page"))
 
 
@@ -800,6 +916,14 @@ def historico_sessao(sessao_id: int):
         return redirect(url_for("historico_page"))
     presencas = obter_presencas_da_sessao(sessao_id)
     return render_template("historico_sessao.html", sessao=sessao, presencas=presencas)
+
+
+@app.route("/historico/<int:sessao_id>/exportar", methods=["GET"])
+def exportar_presenca(sessao_id: int):
+    formato = request.args.get("formato", "pdf").lower()
+    if formato not in {"pdf", "txt"}:
+        formato = "pdf"
+    return exportar_presenca_por_sessao(sessao_id, formato=formato)
 
 
 @app.route("/cadastrar_aluno", methods=["POST"])

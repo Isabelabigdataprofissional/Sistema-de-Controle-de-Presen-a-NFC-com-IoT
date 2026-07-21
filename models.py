@@ -28,11 +28,16 @@ class Aluno(Base):
     def __repr__(self):
         return f"<Aluno(ra='{self.ra}', nome='{self.nome}', id_nfc='{self.id_nfc}')>"
 
+    @property
+    def uid(self) -> str:
+        return self.id_nfc
+
     def to_dict(self):
         return {
             "ra": self.ra,
             "nome": self.nome,
             "id_nfc": self.id_nfc,
+            "uid": self.id_nfc,
         }
 
 

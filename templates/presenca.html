@@ -43,7 +43,7 @@
         </section>
 
         <section class="card">
-            <h2>Présences atuais</h2>
+            <h2>Presentes atuais</h2>
             {% if presentes_lista %}
             <table>
                 <thead>
@@ -78,6 +78,17 @@
             </form>
         </section>
         {% else %}
+        {% if ultima_sessao_encerrada %}
+        <section class="card">
+            <h2>Chamada encerrada com sucesso</h2>
+            <p>Total de alunos presentes: <strong>{{ presentes_lista|length }}</strong></p>
+            <p>Disciplina: <strong>{{ ultima_sessao_encerrada.disciplina }}</strong></p>
+            <p>Turma: <strong>{{ ultima_sessao_encerrada.turma }}</strong></p>
+            <p>Data: <strong>{{ ultima_sessao_encerrada.data }}</strong></p>
+            <a href="{{ url_for('exportar_presenca', sessao_id=ultima_sessao_encerrada.id, formato='pdf') }}" class="botao-principal">Baixar PDF</a>
+            <a href="{{ url_for('exportar_presenca', sessao_id=ultima_sessao_encerrada.id, formato='txt') }}" class="botao-secundario">Baixar TXT</a>
+        </section>
+        {% endif %}
         <section class="card">
             <h2>Iniciar nova chamada</h2>
             <form action="{{ url_for('abrir_chamada') }}" method="post">

@@ -23,6 +23,7 @@
             <table>
                 <thead>
                     <tr>
+                        <th>RA</th>
                         <th>Nome</th>
                         <th>UID NFC</th>
                         <th>Ações</th>
@@ -31,6 +32,7 @@
                 <tbody>
                     {% for aluno in alunos %}
                     <tr>
+                        <td>{{ aluno.ra }}</td>
                         <td>{{ aluno.nome }}</td>
                         <td>{{ aluno.uid }}</td>
                         <td>

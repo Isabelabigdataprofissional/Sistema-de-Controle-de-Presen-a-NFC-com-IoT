@@ -20,12 +20,12 @@
 
         <section class="card">
             <form action="{{ url_for('cadastrar_aluno') }}" method="post">
-                <label>UID do Cartão</label>
-                    <input type="text" name="id_nfc" placeholder="UID NFC" required>
-                    <label>RA do Aluno</label>
-                    <input type="text" name="id_aluno" placeholder="RA do aluno" required>
+                <label>RA do Aluno</label>
+                <input type="text" name="id_aluno" placeholder="RA do aluno" required>
                 <label>Nome</label>
                 <input type="text" name="nome" placeholder="Nome completo" required>
+                <label>UID do Cartão</label>
+                <input type="text" name="id_nfc" placeholder="UID NFC" required>
                 <button type="submit" class="botao-principal">Cadastrar Aluno</button>
             </form>
         </section>

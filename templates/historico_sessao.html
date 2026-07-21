@@ -30,6 +30,10 @@
         <section class="card">
             <h2>Alunos presentes</h2>
             {% if presencas %}
+            <div class="card-actions">
+                <a href="{{ url_for('exportar_presenca', sessao_id=sessao.id, formato='pdf') }}" class="botao-principal">Baixar PDF</a>
+                <a href="{{ url_for('exportar_presenca', sessao_id=sessao.id, formato='txt') }}" class="botao-secundario">Baixar TXT</a>
+            </div>
             <table>
                 <thead>
                     <tr>
